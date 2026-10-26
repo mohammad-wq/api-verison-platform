@@ -1,0 +1,36 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Keep frontend source and repository files inaccessible if they share this document root.
+  # Do not block "backend": the PHP API is deployed beside the frontend.
+  RewriteRule ^(?:Nodejs_Backend|node_modules|prisma|\.git)(?:/|$) - [F,L,NC]
+
+  # Preserve Bearer tokens when API requests are routed to PHP by Apache configuration.
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # Do not return the SPA for API routes or missing asset requests.
+  RewriteCond %{REQUEST_URI} !/(?:api|assets|backend)(?:/|$) [NC]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+<FilesMatch "^(?:\.|config\.php$|.*\.(?:env|sql|log|bak|ini|conf)$)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  <FilesMatch "-[A-Za-z0-9_-]{8,}\.(?:js|css)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <Files "index.html">
+    Header set Cache-Control "no-cache"
+  </Files>
+</IfModule>

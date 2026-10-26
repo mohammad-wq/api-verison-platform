@@ -1,0 +1,5 @@
+/vendor/
+/composer.lock
+/avp.config.php
+# Runtime uploads written by the backend; never ship user files
+/backend/uploads/

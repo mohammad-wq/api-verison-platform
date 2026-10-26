@@ -1,0 +1,6 @@
+# Keep maintainer tooling out of `composer require` dist archives
+/scripts export-ignore
+/backend-overrides export-ignore
+/.gitattributes export-ignore
+
+/bin/avp-serve text eol=lf
