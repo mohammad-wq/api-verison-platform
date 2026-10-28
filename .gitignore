@@ -1,5 +1,12 @@
 /vendor/
 /composer.lock
 /avp.config.php
-# Runtime uploads written by the backend; never ship user files
-/backend/uploads/
+/.avp/
+/client/node_modules/
+/client/dist/
+/client/dist-package/
+# Web-deployment settings and database dumps never belong in the public package repo
+/client/.env
+/client/.env.*
+!/client/.env.package
+/client/*.sql

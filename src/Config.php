@@ -2,13 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Dawatkhi\ApiVersionPlatform;
+namespace Mohammad\ApiVersionPlatform;
 
 /**
  * Resolves package configuration.
  *
- * Precedence (lowest to highest): built-in defaults, the project's avp.config.php, AVP_* environment variables.
- * This file is also required directly by the router and backend bootstrap, so it must not depend on the autoloader.
+ * Precedence (lowest to highest): built-in defaults, avp.config.php, AVP_* environment variables.
  */
 final class Config
 {
@@ -18,17 +17,9 @@ final class Config
     public const FILE_ENV = 'AVP_CONFIG_FILE';
 
     private const DEFAULTS = [
-        'db' => [
-            'host' => '127.0.0.1',
-            'port' => 3306,
-            'name' => 'api_versioning',
-            'user' => 'root',
-            'pass' => '',
-            'charset' => 'utf8mb4',
-        ],
-        'jwt' => [
-            'secret' => '',
-            'expiration' => 604800, // 7 days
+        'paths' => [
+            'readme' => 'README.md',
+            'storage' => '.avp/storage.sqlite',
         ],
         'server' => [
             'host' => '127.0.0.1',
@@ -37,14 +28,8 @@ final class Config
     ];
 
     private const ENV_MAP = [
-        'AVP_DB_HOST' => ['db', 'host'],
-        'AVP_DB_PORT' => ['db', 'port'],
-        'AVP_DB_NAME' => ['db', 'name'],
-        'AVP_DB_USER' => ['db', 'user'],
-        'AVP_DB_PASS' => ['db', 'pass'],
-        'AVP_DB_CHARSET' => ['db', 'charset'],
-        'AVP_JWT_SECRET' => ['jwt', 'secret'],
-        'AVP_JWT_EXPIRATION' => ['jwt', 'expiration'],
+        'AVP_README_PATH' => ['paths', 'readme'],
+        'AVP_STORAGE_PATH' => ['paths', 'storage'],
         'AVP_HOST' => ['server', 'host'],
         'AVP_PORT' => ['server', 'port'],
     ];
@@ -76,8 +61,6 @@ final class Config
             }
         }
 
-        $config['db']['port'] = (int) $config['db']['port'];
-        $config['jwt']['expiration'] = (int) $config['jwt']['expiration'];
         $config['server']['port'] = (int) $config['server']['port'];
 
         return $config;
@@ -90,15 +73,15 @@ final class Config
         return is_file($path) ? $path : null;
     }
 
-    /** @return list<string> Problems that prevent the backend from working */
+    /** @return list<string> Problems that prevent the local tool from working */
     public static function validate(array $config): array
     {
         $errors = [];
-        if (strlen((string) $config['jwt']['secret']) < 32) {
-            $errors[] = 'jwt.secret must be at least 32 characters (run `avp-serve init` to generate one).';
+        if (trim((string) $config['paths']['readme']) === '') {
+            $errors[] = 'paths.readme is required.';
         }
-        if ($config['db']['name'] === '' || $config['db']['user'] === '') {
-            $errors[] = 'db.name and db.user are required.';
+        if (trim((string) $config['paths']['storage']) === '') {
+            $errors[] = 'paths.storage is required.';
         }
         return $errors;
     }

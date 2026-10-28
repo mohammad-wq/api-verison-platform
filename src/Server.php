@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Dawatkhi\ApiVersionPlatform;
+namespace Mohammad\ApiVersionPlatform;
 
 /** Launches PHP's built-in server with the package router and bundled UI. */
 final class Server
@@ -28,6 +28,11 @@ final class Server
         ];
 
         $env = getenv();
+        $env['AVP_SERVER_HOST'] = $host;
+        // Lets the UI keep working while the Test APIs tab waits on a slow API. PHP does not support workers on Windows.
+        if (PHP_OS_FAMILY !== 'Windows' && !isset($env['PHP_CLI_SERVER_WORKERS'])) {
+            $env['PHP_CLI_SERVER_WORKERS'] = '4';
+        }
         if ($configFile !== null) {
             $env[Config::FILE_ENV] = $configFile;
         }
@@ -41,7 +46,7 @@ final class Server
         return proc_close($process);
     }
 
-    /** Write a starter avp.config.php into $projectRoot with a random JWT secret. */
+    /** Write a starter local-only avp.config.php into $projectRoot. */
     public static function init(string $projectRoot, bool $force = false): string
     {
         $target = rtrim($projectRoot, '/\\') . DIRECTORY_SEPARATOR . Config::FILE_NAME;
@@ -50,10 +55,12 @@ final class Server
         }
 
         $template = file_get_contents(self::packageRoot() . '/config/avp.config.example.php');
-        $contents = str_replace('change-me-to-a-random-64-char-string', bin2hex(random_bytes(32)), $template);
-
-        if (file_put_contents($target, $contents) === false) {
+        if (file_put_contents($target, $template) === false) {
             throw new \RuntimeException("Could not write {$target}.");
+        }
+        $stateDir = rtrim($projectRoot, '/\\') . DIRECTORY_SEPARATOR . '.avp';
+        if (!is_dir($stateDir) && !mkdir($stateDir, 0777, true) && !is_dir($stateDir)) {
+            throw new \RuntimeException("Could not create {$stateDir}.");
         }
         return $target;
     }

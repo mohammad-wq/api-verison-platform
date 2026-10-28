@@ -1,80 +1,80 @@
 <?php
 
-/**
- * Router for PHP's built-in server (`php -S ... src/router.php`). Not used in production web servers.
- *
- *  /backend/*.php     -> bundled PHP backend script
- *  /backend/uploads/* -> uploaded files
- *  existing UI files  -> served natively by the built-in server
- *  anything else      -> resources/ui/index.html (SPA fallback for client-side routes)
- */
-
 declare(strict_types=1);
 
+use Mohammad\ApiVersionPlatform\Config;
+use Mohammad\ApiVersionPlatform\LocalApi;
+use Mohammad\ApiVersionPlatform\Storage;
+use Mohammad\ApiVersionPlatform\VersionService;
+
+require_once __DIR__ . '/Config.php';
+require_once __DIR__ . '/SourceHasher.php';
+require_once __DIR__ . '/Storage.php';
+require_once __DIR__ . '/VersionService.php';
+require_once __DIR__ . '/LocalApi.php';
+
 $uiDir = realpath(__DIR__ . '/../resources/ui');
-$backendDir = realpath(__DIR__ . '/../backend');
 $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/');
 
-function avpNotFound(): bool
+/** @return array{0: VersionService, 1: Storage, 2: string, 3: string} service, storage, project root, README path */
+function avpServices(): array
 {
-    http_response_code(404);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['statusCode' => 404, 'message' => 'Not Found', 'data' => null, 'timestamp' => date('Y-m-d H:i:s')]);
-    return true;
+    $configFile = getenv(Config::FILE_ENV) ?: null;
+    $config = Config::load($configFile);
+    $errors = Config::validate($config);
+    if ($errors) throw new RuntimeException(implode(' ', $errors));
+    $root = $configFile ? dirname($configFile) : getcwd();
+    $readme = $config['paths']['readme'];
+    $storagePath = $config['paths']['storage'];
+    if (!preg_match('#^(?:[A-Za-z]:[\\\\/]|/)#', $readme)) $readme = $root . DIRECTORY_SEPARATOR . $readme;
+    if (!preg_match('#^(?:[A-Za-z]:[\\\\/]|/)#', $storagePath)) $storagePath = $root . DIRECTORY_SEPARATOR . $storagePath;
+    $storage = new Storage($storagePath);
+    return [new VersionService($readme, $storage), $storage, $root, $readme];
 }
 
-/** Resolve $relative inside $root, rejecting traversal outside it. */
-function avpResolve(string|false $root, string $relative): ?string
+/** The API is unauthenticated, so only same-machine pages may call it. */
+function avpGuard(): void
 {
-    if ($root === false) {
-        return null;
+    $loopback = ['127.0.0.1', 'localhost', '::1', '[::1]'];
+    $bind = getenv('AVP_SERVER_HOST') ?: '127.0.0.1';
+    $host = strtolower(preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? '')) ?? '');
+    // A non-loopback Host on a loopback-bound server means DNS rebinding.
+    if (in_array($bind, $loopback, true) && !in_array($host, $loopback, true)) {
+        LocalApi::send(403, 'Requests must use localhost or 127.0.0.1.');
     }
-    $target = realpath($root . $relative);
-    if ($target === false || !is_file($target) || !str_starts_with($target, $root . DIRECTORY_SEPARATOR)) {
-        return null;
+    // A cross-site page cannot send a JSON content type without a CORS preflight, which this server never grants.
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET' && !str_starts_with(strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? '')), 'application/json')) {
+        LocalApi::send(415, 'Expected a JSON request body.');
     }
-    return $target;
 }
 
-if (preg_match('#^/backend(/.*)$#', $path, $m)) {
-    $relative = $m[1];
-    $target = avpResolve($backendDir, $relative);
-    if ($target === null) {
-        return avpNotFound();
+if (str_starts_with($path, '/api/')) {
+    try {
+        avpGuard();
+        [$service, $storage, $root, $readme] = avpServices();
+        (new LocalApi($service, $storage, $root, $readme))->handle(substr($path, 4), $_SERVER['REQUEST_METHOD']);
+        LocalApi::send(404, 'Not Found');
+    } catch (InvalidArgumentException $e) {
+        LocalApi::send(400, $e->getMessage());
+    } catch (RuntimeException $e) {
+        LocalApi::send(422, $e->getMessage());
+    } catch (Throwable $e) {
+        error_log($e->getMessage());
+        LocalApi::send(500, 'Local API error.');
     }
-
-    if (strtolower(pathinfo($target, PATHINFO_EXTENSION)) === 'php') {
-        // Make the target look like the executed script so the backend's direct-access guards work.
-        $_SERVER['SCRIPT_FILENAME'] = $target;
-        $_SERVER['SCRIPT_NAME'] = $_SERVER['PHP_SELF'] = '/backend' . $relative;
-        chdir(dirname($target));
-        require $target;
-        return true;
-    }
-
-    if (str_starts_with($relative, '/uploads/')) {
-        $mime = function_exists('mime_content_type') ? mime_content_type($target) : false;
-        header('Content-Type: ' . ($mime ?: 'application/octet-stream'));
-        header('Content-Length: ' . filesize($target));
-        readfile($target);
-        return true;
-    }
-
-    return avpNotFound();
 }
 
-if ($path !== '/' && avpResolve($uiDir, $path) !== null) {
-    return false;
+if ($path !== '/' && $uiDir !== false) {
+    $candidate = realpath($uiDir . DIRECTORY_SEPARATOR . ltrim($path, '/'));
+    if ($candidate !== false && is_file($candidate) && str_starts_with($candidate, $uiDir . DIRECTORY_SEPARATOR)) return false;
 }
 
 $index = $uiDir === false ? null : $uiDir . DIRECTORY_SEPARATOR . 'index.html';
 if ($index === null || !is_file($index)) {
     http_response_code(503);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "UI bundle missing: resources/ui/index.html. Copy the Vite build (client/dist) into it with `php scripts/sync.php --ui=<path>`.\n";
+    echo 'UI bundle missing.';
     return true;
 }
-
 header('Content-Type: text/html; charset=utf-8');
 readfile($index);
 return true;

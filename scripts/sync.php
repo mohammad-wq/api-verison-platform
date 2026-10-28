@@ -1,20 +1,16 @@
 <?php
 
 /**
- * Copy build output from the web project into this package. Either option can be given alone.
+ * Copy the local UI build into this package.
  *
- *   --ui=<path>       Vite build output (client/dist) -> resources/ui
- *   --backend=<path>  php_backend folder -> backend (minus config.php and uploads), then backend-overrides/ on top
+ *   --ui=<path>       Vite package build (client/dist-package, from `npm run build:package`) -> resources/ui
  *
- * Usage: php scripts/sync.php --ui=../web/client/dist [--backend=../web/php_backend]
+ * Usage: php scripts/sync.php --ui=client/dist-package
  */
 
 declare(strict_types=1);
 
 $packageRoot = dirname(__DIR__);
-
-// Never ship credentials or user data from the web backend.
-$backendExcludes = ['config.php', 'uploads'];
 
 function step(string $message): void
 {
@@ -68,15 +64,15 @@ function copyTree(string $from, string $to, array $excludes = []): int
     return $count;
 }
 
-$options = getopt('', ['ui:', 'backend:']);
+$options = getopt('', ['ui:']);
 if (!$options) {
-    fail("Usage: php scripts/sync.php --ui=<path to client/dist> [--backend=<path to php_backend>]");
+    fail("Usage: php scripts/sync.php --ui=<path to client/dist-package>");
 }
 
 if (isset($options['ui'])) {
     $ui = realpath($options['ui']) ?: fail("UI path not found: {$options['ui']}");
     if (!is_file($ui . '/index.html')) {
-        fail("{$ui} has no index.html. Point --ui at the Vite build output (client/dist), after `npm run build`.");
+        fail("{$ui} has no index.html. Point --ui at the package build (client/dist-package), after `npm run build:package`.");
     }
     // An absolute asset base (e.g. base: '/app/') would make the UI 404 when served by avp-serve.
     if (preg_match('/(?:src|href)="\/(?!\/)/', file_get_contents($ui . '/index.html'))) {
@@ -85,19 +81,6 @@ if (isset($options['ui'])) {
 
     step("Copying {$ui} -> resources/ui");
     removeTree($packageRoot . '/resources/ui');
-    $count = copyTree($ui, $packageRoot . '/resources/ui');
+    $count = copyTree($ui, $packageRoot . '/resources/ui', ['.htaccess']); // Apache-only; the built-in server ignores it
     step("{$count} UI files copied");
-}
-
-if (isset($options['backend'])) {
-    $backend = realpath($options['backend']) ?: fail("Backend path not found: {$options['backend']}");
-    if (!is_dir($backend . '/includes')) {
-        fail("{$backend} doesn't look like php_backend (no includes/ folder).");
-    }
-
-    step("Copying {$backend} -> backend");
-    removeTree($packageRoot . '/backend');
-    $count = copyTree($backend, $packageRoot . '/backend', $backendExcludes);
-    $count += copyTree($packageRoot . '/backend-overrides', $packageRoot . '/backend');
-    step("{$count} backend files copied");
 }

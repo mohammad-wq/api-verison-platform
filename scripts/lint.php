@@ -5,8 +5,8 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
-$files = [$root . '/bin/avp-serve'];
-foreach (['src', 'backend', 'backend-overrides', 'config', 'scripts'] as $dir) {
+$files = [$root . '/bin/avp', $root . '/bin/avp-serve'];
+foreach (['src', 'config', 'scripts'] as $dir) {
     if (!is_dir("{$root}/{$dir}")) {
         continue;
     }

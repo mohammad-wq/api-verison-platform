@@ -1,27 +1,23 @@
 {
-    "name": "dawatkhi/api-version-platform",
-    "description": "Self-contained API Version Platform UI and PHP backend, served locally via `vendor/bin/avp-serve`.",
+    "name": "mohammad/api-version-platform",
+    "description": "Local README-to-OpenAPI versioning for PHP projects.",
     "type": "library",
-    "license": "proprietary",
+    "license": "MIT",
     "keywords": ["openapi", "api", "versioning", "swagger", "ui"],
     "require": {
         "php": ">=8.1",
         "ext-pdo": "*",
-        "ext-pdo_mysql": "*",
+        "ext-pdo_sqlite": "*",
         "ext-json": "*",
-        "ext-curl": "*",
         "composer-runtime-api": "^2.2"
-    },
-    "suggest": {
-        "ext-gd": "Required for avatar uploads (WebP conversion)",
-        "ext-fileinfo": "Required for avatar upload MIME validation"
     },
     "autoload": {
         "psr-4": {
-            "Dawatkhi\\ApiVersionPlatform\\": "src/"
+            "Mohammad\\ApiVersionPlatform\\": "src/"
         }
     },
     "bin": [
+        "bin/avp",
         "bin/avp-serve"
     ],
     "scripts": {

@@ -1,82 +1,121 @@
-# dawatkhi/api-version-platform
+# mohammad/api-version-platform
 
-The API Version Platform (React UI + PHP backend) as a Composer package. Install it into any PHP project and launch it with one command. No Node.js, Apache, or route wiring is needed.
+Version your API documentation locally. Write your API in a README using the bundled Markdown template; the platform turns it into OpenAPI 3.0, keeps every version in a local SQLite database, and gives you the full API Version Platform web UI (version history, diffs, OpenAPI viewer and an API tester) on `localhost`.
 
-> Local development tool. It runs on PHP's built-in server, which is not meant for production. It binds to `127.0.0.1` by default.
+No Node.js, MySQL, accounts or web-server setup is needed.
 
-## Usage
+> Local developer tool. It runs on PHP's built-in server, has no authentication, and binds to `127.0.0.1` by default. Do not expose it on a public network.
+
+## Requirements
+
+- PHP 8.1+
+- `pdo_sqlite` extension (enabled in most PHP builds)
+- `openssl` extension, only to test HTTPS APIs from the Test APIs tab
+
+## Quick start
 
 ```bash
-composer require --dev dawatkhi/api-version-platform
-vendor/bin/avp-serve init      # writes avp.config.php with a random JWT secret
-# edit the db section of avp.config.php, and add avp.config.php to .gitignore
-vendor/bin/avp-serve check     # validates config + database connection
-vendor/bin/avp-serve           # http://127.0.0.1:8080
-vendor/bin/avp-serve --port=9000 --host=0.0.0.0 --config=path/to/avp.config.php
+composer require --dev mohammad/api-version-platform
+
+vendor/bin/avp init                      # writes avp.config.php and creates .avp/
+vendor/bin/avp template --output=README.md   # skip if your README already follows the template
+vendor/bin/avp version create v1.0.0 --note="First version"
+vendor/bin/avp serve                     # http://127.0.0.1:8080
 ```
 
-The database must already contain the platform schema (same MySQL schema as the hosted `php_backend`).
+Add the local state to your project's `.gitignore`:
 
-### Configuration
+```gitignore
+/.avp/
+```
 
-Values are resolved from lowest to highest priority:
+## CLI
 
-1. Defaults in `src/Config.php`
-2. `avp.config.php` in the project root, or the file given with `--config` (see `config/avp.config.example.php`)
-3. Environment variables: `AVP_DB_HOST`, `AVP_DB_PORT`, `AVP_DB_NAME`, `AVP_DB_USER`, `AVP_DB_PASS`, `AVP_DB_CHARSET`, `AVP_JWT_SECRET`, `AVP_JWT_EXPIRATION`, `AVP_HOST`, `AVP_PORT`
+```text
+avp init [--force]
+avp template [--output=PATH] [--force]
+avp status [--readme=PATH] [--json]
+avp version create <label> [--note=TEXT] [--readme=PATH] [--allow-unchanged]
+avp version list [--json]
+avp version show <label> [--format=markdown|openapi|json]
+avp serve [--host=127.0.0.1] [--port=8080]
+```
+
+Every command accepts `--config=PATH`. `avp-serve` is kept as an alias of `avp`.
+
+`avp status` works like `git status` for the configured README:
+
+| State | Meaning | Exit code |
+| --- | --- | --- |
+| `uninitialized` | README is valid but no version was created from it yet | 0 |
+| `clean` | README matches the last version created from it | 0 |
+| `modified` | README changed since that version | 2 |
+| `missing` / `invalid` | README cannot be read, or has no endpoints | 1 |
+
+Line-ending (CRLF/LF) and UTF-8 BOM differences do not count as changes.
+
+## Web UI
+
+`avp serve` opens the same interface as the hosted platform, running as a single local project:
+
+- **README banner**: when the configured README changes, the UI shows what changed (endpoints added, removed or changed) and saves it as the next version in one click.
+- **Versions**: upload or paste README Markdown or OpenAPI JSON, review it, and save it as a version; view, edit, compare and delete versions.
+- **Test APIs**: send requests to your API using environments (base URLs) you define. Requests are sent by the local PHP server, so CORS does not apply.
+- **History**: requests sent from the tester, stored locally.
+
+Accounts, collaborators and share links belong to the hosted platform and are not part of the package.
+
+Versions created from the README (CLI or banner) store the exact Markdown source and move the README baseline. Versions imported or edited in the UI store OpenAPI only and do not change `avp status`.
+
+## Configuration
+
+`avp.config.php` (created by `avp init`; see `config/avp.config.example.php`):
+
+```php
+return [
+    'paths' => [
+        'readme' => 'README.md',              // the working copy
+        'storage' => '.avp/storage.sqlite',
+    ],
+    'server' => [
+        'host' => '127.0.0.1',
+        'port' => 8080,
+    ],
+];
+```
+
+Relative paths are resolved from the config file's folder. Environment variables override the file: `AVP_README_PATH`, `AVP_STORAGE_PATH`, `AVP_HOST`, `AVP_PORT`.
 
 ## How it works
 
 ```
-bin/avp-serve         CLI: init / check / serve -> php -S host:port -t resources/ui src/router.php
-src/router.php        /backend/*.php -> backend script, static UI files -> served natively, else -> index.html
-src/Config.php        config resolution (file + env)
-src/Server.php        process launcher + `init`
-resources/ui/         pre-built client (generated, committed)
-backend/              copy of php_backend (generated, committed)
-backend-overrides/    files replacing their php_backend counterparts; config.php reads avp config instead of hardcoded credentials
-scripts/sync.php      copies a Vite build / php_backend into the package
+bin/avp               CLI: init / template / status / version / serve
+src/router.php        /api/* -> local API, static UI files, everything else -> index.html
+src/LocalApi.php      the web client's API routes for one local user and project
+src/VersionService.php  README status, version create/import/edit/delete
+src/Storage.php       SQLite schema and migrations
+src/MarkdownOpenApiParser.php  README Markdown -> OpenAPI 3.0.3
+resources/ui/         pre-built web client (generated, committed)
+resources/templates/  README template served by `avp template` and the UI
+client/               React source shared with the hosted web app (not in Composer archives)
 ```
 
-The built UI calls its API at `./backend/...` relative to the page it's served from (`client/src/base.js` in the web project). Serving the UI at `/` and the backend at `/backend/` therefore needs no client changes.
+## Updating the bundled UI (maintainers)
 
-## Updating the package
-
-`resources/ui/` and `backend/` are copies of the web project's build output. Don't edit them by hand.
-
-The web deployment and this package use the same Vite build. When the frontend changes:
-
-1. In the web project run `npm run build` once. Upload `dist/` to the web server as usual.
-2. Copy the same `dist/` into this package:
-   ```bash
-   php scripts/sync.php --ui=../web-project/client/dist
-   ```
-   You can also replace the contents of `resources/ui/` by hand. The script is safer: it clears out old hashed files and rejects a build that uses absolute asset paths.
-3. Commit, tag a new version (`git tag v0.2.0 && git push --tags`), and consumers run `composer update`.
-
-When the PHP backend changes, sync it the same way. You can pass both options in one call:
+The UI in `resources/ui/` is the web app's React build in local mode. Do not edit it by hand. After changing the frontend in `client/`:
 
 ```bash
-php scripts/sync.php --backend=../web-project/php_backend
-php scripts/lint.php   # php -l on every package PHP file
+cd client
+npm install
+npm run build:package          # builds into client/dist-package with VITE_API_BASE=./api
+cd ..
+php scripts/sync.php --ui=client/dist-package
+cp client/src/templates/API_README_TEMPLATE.md resources/templates/api-readme.md   # if the template changed
+php scripts/lint.php
 ```
 
-The backend sync never copies `config.php` (it holds credentials) or `uploads/`, and applies `backend-overrides/config.php` on top. If the web `config.php` gains new behaviour, port it to the override by hand.
+`npm run build` (the hosted web build) is unaffected. Then commit, tag a new version (`git tag v0.2.0 && git push --tags`), and consumers run `composer update`.
 
-The same build only works for both while `VITE_API_BASE` is empty when you build. A build with a hardcoded API URL will call that server instead of the bundled backend.
+## License
 
-### Publishing
-
-This folder is the repository root, so `composer.json` is where Packagist expects it.
-
-- Public: push to GitHub and submit the repo URL on packagist.org. Git tags become versions.
-- Private: consuming projects add the repo as a VCS repository:
-  ```json
-  "repositories": [{ "type": "vcs", "url": "git@github.com:your-org/api-version-platform.git" }]
-  ```
-  To test locally before pushing, use `{ "type": "path", "url": "../api-version-platform" }` instead.
-
-## Known limitations
-
-- Avatar uploads are written to `backend/uploads/` inside `vendor/`, so `composer update` wipes them. Making the upload directory configurable needs a small change in the web project's `php_backend/includes/helpers.php`, followed by a backend sync.
-- There is no schema installer yet. The database has to be provisioned separately.
+MIT
