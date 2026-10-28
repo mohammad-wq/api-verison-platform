@@ -226,9 +226,35 @@ export function describeEntry(e) {
   return parts.join(", ");
 }
 
+/** "data.user.email" -> "data.user", "query:page" -> "query", "email" -> "". */
+const parentOf = (key) => key.slice(0, Math.max(key.lastIndexOf("."), key.lastIndexOf(":"), 0));
+
 /**
- * Row-by-row comparison of two keyed maps. Rows: { key, status: "added" | "removed" | "changed" | "same", old, new }.
- * Order: the old map's order, then keys that only exist in the new map.
+ * Merges a removed and an added row into one "renamed" row when they share a parent and an identical
+ * definition, and no other removed/added row there has that definition (so the pairing is unambiguous).
+ */
+function pairRenames(rows, signature) {
+  const groupKey = (row, side) => `${parentOf(row.key)}\u0000${signature(row[side])}`;
+  const removed = new Map();
+  const added = new Map();
+  for (const row of rows) {
+    if (row.status === "removed") removed.set(groupKey(row, "old"), [...(removed.get(groupKey(row, "old")) ?? []), row]);
+    if (row.status === "added") added.set(groupKey(row, "new"), [...(added.get(groupKey(row, "new")) ?? []), row]);
+  }
+  const replaced = new Map();
+  const dropped = new Set();
+  for (const [group, gone] of removed) {
+    const arrived = added.get(group);
+    if (gone.length !== 1 || arrived?.length !== 1) continue;
+    replaced.set(gone[0], { key: arrived[0].key, oldKey: gone[0].key, status: "renamed", old: gone[0].old, new: arrived[0].new });
+    dropped.add(arrived[0]);
+  }
+  return rows.filter((row) => !dropped.has(row)).map((row) => replaced.get(row) ?? row);
+}
+
+/**
+ * Row-by-row comparison of two keyed maps. Rows: { key, status: "added" | "removed" | "renamed" | "changed" | "same", old, new }.
+ * A "renamed" row also has `oldKey`. Order: the old map's order, then keys that only exist in the new map.
  */
 export function compareMaps(oldMap, newMap, signature = entrySignature) {
   const rows = [];
@@ -238,12 +264,12 @@ export function compareMaps(oldMap, newMap, signature = entrySignature) {
     else rows.push({ key, status: signature(before) === signature(after) ? "same" : "changed", old: before, new: after });
   }
   for (const [key, after] of newMap) if (!oldMap.has(key)) rows.push({ key, status: "added", old: null, new: after });
-  return rows;
+  return pairRenames(rows, signature);
 }
 
-/** { added, removed, changed } counts of compareMaps rows. */
+/** { added, removed, renamed, changed } counts of compareMaps rows. */
 export function countStatuses(rows) {
-  const counts = { added: 0, removed: 0, changed: 0 };
+  const counts = { added: 0, removed: 0, renamed: 0, changed: 0 };
   for (const row of rows) if (row.status in counts) counts[row.status]++;
   return counts;
 }

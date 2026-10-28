@@ -47,8 +47,10 @@ function ComparisonRequest({ from, to, endpoint, project, apiToken, latestVersio
       {result && (
         <>
           <section className="card cmp-api-contract">
-            <h4>Contract changes</h4>
-            <ChangeSections comparison={contract} />
+            <h4>
+              What changed from <code>{result.from.version.versionNumber}</code> to <code>{result.to.version.versionNumber}</code>
+            </h4>
+            <ChangeSections comparison={contract} labels={{ old: result.from.version.versionNumber, new: result.to.version.versionNumber }} />
           </section>
           {project.baseUrl ? (
             <div className="cmp-try-cols cmp-api-try-cols">

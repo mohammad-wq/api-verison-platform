@@ -3,7 +3,7 @@
  * older and a newer version of the same endpoint) into a structured comparison the UI can render.
  * Either side may be null (the endpoint does not exist in that version).
  */
-import { compareMaps, countStatuses, diffLines, flattenSchema, formFieldMap, jsonLines, parameterMap, summarizeRows, textLines } from "./diff.js";
+import { compareMaps, countStatuses, describeEntry, diffLines, flattenSchema, formFieldMap, jsonLines, parameterMap, summarizeRows, textLines } from "./diff.js";
 
 const MULTIPART = "multipart/form-data";
 
@@ -19,7 +19,7 @@ function exampleOf(body) {
   return { value: body.sample ?? null, generated: body.sample != null };
 }
 
-const anyCount = (c) => c.added + c.removed + c.changed > 0;
+const anyCount = (c) => c.added + c.removed + c.changed + (c.renamed ?? 0) > 0;
 const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 function presenceOf(before, after) {
@@ -143,6 +143,7 @@ export function buildComparison(oldOp, newOp) {
             body.required.changed && (body.required.new ? "now required" : "now optional"),
             body.fieldCounts.added > 0 && `${plural(body.fieldCounts.added, "field")} added`,
             body.fieldCounts.removed > 0 && `${body.fieldCounts.removed} removed`,
+            body.fieldCounts.renamed > 0 && `${body.fieldCounts.renamed} renamed`,
             body.fieldCounts.changed > 0 && `${body.fieldCounts.changed} changed`,
             !anyCount(body.fieldCounts) && anyCount(body.exampleCounts) && "example changed",
           ]),
@@ -155,6 +156,7 @@ export function buildComparison(oldOp, newOp) {
         ? joinParts([
             parameters.counts.added > 0 && `${parameters.counts.added} added`,
             parameters.counts.removed > 0 && `${parameters.counts.removed} removed`,
+            parameters.counts.renamed > 0 && `${parameters.counts.renamed} renamed`,
             parameters.counts.changed > 0 && `${parameters.counts.changed} changed`,
           ])
         : parameters.rows.length
@@ -183,5 +185,67 @@ export function buildComparison(oldOp, newOp) {
     },
   ];
 
-  return { body, parameters, responses, docs, summary, changed: summary.some((s) => s.changed), equal: sameJson(oldOp, newOp) };
+  return {
+    body,
+    parameters,
+    responses,
+    docs,
+    summary,
+    changes: changeList(body, parameters, responses, docs),
+    changed: summary.some((s) => s.changed),
+    equal: sameJson(oldOp, newOp),
+  };
+}
+
+const parameterName = (key) => {
+  const [where, ...name] = key.split(":");
+  return { name: name.join(":"), where: where === "path" ? "Path parameter" : where === "header" ? "Header" : "Query parameter" };
+};
+
+/** One plain-language line per field row that is not unchanged. */
+function fieldChanges(rows, area, nameOf = (key) => ({ name: key, where: area })) {
+  return rows
+    .filter((row) => row.status !== "same")
+    .map((row) => {
+      const { name, where } = nameOf(row.key);
+      const oldName = row.oldKey ? nameOf(row.oldKey).name : null;
+      const detail =
+        row.status === "changed" ? { from: describeEntry(row.old), to: describeEntry(row.new) } : { text: describeEntry(row.new ?? row.old) };
+      return { kind: row.status, area: where, name, oldName, ...detail };
+    });
+}
+
+/**
+ * Every difference between the two operations as a flat list, most important first:
+ * [{ kind: added | removed | renamed | changed, area, name?, oldName?, text? | from/to }].
+ */
+function changeList(body, parameters, responses, docs) {
+  const list = [];
+  const onOff = (value) => (value ? "required" : "public");
+  if (docs.auth.changed) list.push({ kind: "changed", area: "Authentication", from: onOff(docs.auth.old), to: onOff(docs.auth.new) });
+
+  if (body.presence === "added" || body.presence === "removed") list.push({ kind: body.presence, area: "Request body", text: `the whole body (${body.contentType.new ?? body.contentType.old})` });
+  if (body.contentType.changed) list.push({ kind: "changed", area: "Request body", name: "content type", from: body.contentType.old, to: body.contentType.new });
+  if (body.required.changed) list.push({ kind: "changed", area: "Request body", name: "required", from: body.required.old ? "yes" : "no", to: body.required.new ? "yes" : "no" });
+  if (body.presence === "both") list.push(...fieldChanges(body.fieldRows, "Request body field"));
+  if (body.presence === "both" && !anyCount(body.fieldCounts) && anyCount(body.exampleCounts)) list.push({ kind: "changed", area: "Request body", text: "example values changed" });
+
+  list.push(...fieldChanges(parameters.rows, "Parameter", parameterName));
+
+  for (const item of responses.items) {
+    const area = `Response ${item.status}`;
+    if (item.presence !== "both") {
+      list.push({ kind: item.presence, area, text: item.new?.description ?? item.old?.description ?? "" });
+      continue;
+    }
+    if (item.descriptionChanged) list.push({ kind: "changed", area, name: "description", from: item.old.description, to: item.new.description });
+    list.push(...fieldChanges(item.fieldRows, `${area} field`));
+    if (!anyCount(item.fieldCounts) && anyCount(item.exampleCounts)) list.push({ kind: "changed", area, text: "example values changed" });
+  }
+
+  for (const item of docs.items.filter((i) => i.changed)) {
+    if (item.rows) list.push({ kind: "changed", area: item.label, text: "wording changed" });
+    else list.push({ kind: "changed", area: item.label, from: item.old.join(", ") || "none", to: item.new.join(", ") || "none" });
+  }
+  return list;
 }

@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Badge } from "../ui.jsx";
 import { Icon } from "../icons.jsx";
-import { FieldsDiff, TextDiff } from "./DiffViews.jsx";
+import { FieldsDiff, STATUS_BADGE, TextDiff } from "./DiffViews.jsx";
 
 function Section({ id, title, changed, text, children }) {
   return (
@@ -21,9 +22,22 @@ const parameterLabel = (key) => {
   return where === "header" ? `${name.join(":")} (header)` : name.join(":");
 };
 
-function BodySection({ body }) {
+/** A diff column heading: the version number, plus a tag when the example was generated from the schema. */
+function SideLabel({ version, generated }) {
+  return (
+    <span className="cmp-th">
+      <code>{version}</code>
+      {generated && (
+        <span className="cmp-th-tag" title="No example is documented for this version, so one was generated from the schema">
+          sample from schema
+        </span>
+      )}
+    </span>
+  );
+}
+
+function BodySection({ body, labels }) {
   if (body.presence === "none") return <p className="muted cmp-empty">No request body documented in either version.</p>;
-  const generated = (side) => (body.generated[side] ? " (generated from the schema — no example documented)" : "");
   return (
     <>
       <div className="cmp-meta">
@@ -53,18 +67,23 @@ function BodySection({ body }) {
       {body.contentType.new !== "multipart/form-data" && body.contentType.old !== "multipart/form-data" && (
         <div className="cmp-block">
           <h5 className="cmp-block-title">Example request body</h5>
-          <TextDiff rows={body.exampleRows} oldLabel={`Older example${generated("old")}`} newLabel={`Newer example${generated("new")}`} empty="No example available in either version." />
+          <TextDiff
+            rows={body.exampleRows}
+            oldLabel={<SideLabel version={labels.old} generated={body.generated.old} />}
+            newLabel={<SideLabel version={labels.new} generated={body.generated.new} />}
+            empty="No example available in either version."
+          />
         </div>
       )}
       <div className="cmp-block">
         <h5 className="cmp-block-title">Fields{body.fieldRows.length ? ` (${body.fieldRows.length})` : ""}</h5>
-        <FieldsDiff rows={body.fieldRows} noun="field" />
+        <FieldsDiff rows={body.fieldRows} noun="field" oldLabel={labels.old} newLabel={labels.new} />
       </div>
     </>
   );
 }
 
-function ResponseItem({ item }) {
+function ResponseItem({ item, labels }) {
   const kind = /^2/.test(item.status) ? "ok" : /^[45]/.test(item.status) ? "warn" : "neutral";
   return (
     <details className={`cmp-resp${item.changed ? " is-changed" : ""}`} open={item.changed && item.presence === "both"}>
@@ -86,13 +105,13 @@ function ResponseItem({ item }) {
         {item.hasExample && (
           <div className="cmp-block">
             <h5 className="cmp-block-title">Example response</h5>
-            <TextDiff rows={item.exampleRows} oldLabel="Older example" newLabel="Newer example" empty="No example documented for this response." />
+            <TextDiff rows={item.exampleRows} oldLabel={<SideLabel version={labels.old} />} newLabel={<SideLabel version={labels.new} />} empty="No example documented for this response." />
           </div>
         )}
         {item.fieldRows.length > 0 && (
           <div className="cmp-block">
             <h5 className="cmp-block-title">Fields ({item.fieldRows.length})</h5>
-            <FieldsDiff rows={item.fieldRows} />
+            <FieldsDiff rows={item.fieldRows} oldLabel={labels.old} newLabel={labels.new} />
           </div>
         )}
         {item.fieldRows.length === 0 && !item.hasExample && !item.descriptionChanged && <p className="muted cmp-empty">No response body is documented for this status.</p>}
@@ -115,7 +134,7 @@ function Chips({ list }) {
   );
 }
 
-function DocsSection({ docs }) {
+function DocsSection({ docs, labels }) {
   return (
     <div className="cmp-docs">
       <div className="cmp-doc-row">
@@ -136,7 +155,7 @@ function DocsSection({ docs }) {
             <div className="cmp-doc-label">
               {item.label} {item.changed && <Badge kind="warn">changed</Badge>}
             </div>
-            {item.rows.length ? <TextDiff rows={item.rows} oldLabel="Older" newLabel="Newer" context={2} /> : <span className="muted">none in either version</span>}
+            {item.rows.length ? <TextDiff rows={item.rows} oldLabel={<SideLabel version={labels.old} />} newLabel={<SideLabel version={labels.new} />} context={2} /> : <span className="muted">none in either version</span>}
           </div>
         ) : (
           <div key={item.label} className="cmp-doc-row">
@@ -158,24 +177,92 @@ function DocsSection({ docs }) {
   );
 }
 
-/** The detailed, side-by-side change sections for one endpoint (see lib/compare.js buildComparison). */
-export default function ChangeSections({ comparison }) {
-  const { body, parameters, responses, docs, summary } = comparison;
+/** The differences as short sentences, e.g. "Renamed · Request body field · email → identifier". */
+function ChangeList({ changes }) {
+  if (changes.length === 0) return <p className="cmp-nochange">No contract differences between these versions.</p>;
+  return (
+    <ul className="cmp-changes" aria-label="What changed">
+      {changes.map((change, i) => (
+        <li key={i} className={`cmp-change cmp-change-${change.kind}`}>
+          <Badge kind={STATUS_BADGE[change.kind][0]}>{STATUS_BADGE[change.kind][1]}</Badge>
+          <span className="cmp-change-area">{change.area}</span>
+          <span className="cmp-change-what">
+            {change.oldName ? (
+              <span className="cmp-rename">
+                <code className="cmp-rename-old">{change.oldName}</code>
+                <Icon name="arrowRight" size="13px" />
+                <code className="cmp-rename-new">{change.name}</code>
+              </span>
+            ) : (
+              change.name && <code>{change.name}</code>
+            )}
+            {change.from !== undefined ? (
+              <span className="cmp-fromto">
+                <span className="cmp-from">{String(change.from ?? "—")}</span>
+                <Icon name="arrowRight" size="13px" />
+                <span className="cmp-to">{String(change.to ?? "—")}</span>
+              </span>
+            ) : (
+              change.text && <span className="muted">{change.text}</span>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The comparison of one endpoint (see lib/compare.js buildComparison): a plain list of what changed, then the
+ * detailed side-by-side sections. Sections without changes are folded into one line so the changes stand out.
+ * `labels` are the two version numbers, used as column headings.
+ */
+export default function ChangeSections({ comparison, labels = { old: "Older", new: "Newer" } }) {
+  const { body, parameters, responses, docs, summary, changes } = comparison;
+  const [showUnchanged, setShowUnchanged] = useState(false);
   const text = Object.fromEntries(summary.map((s) => [s.id, s.text]));
+  const sections = [
+    { id: "body", title: "Request body", changed: body.changed, content: <BodySection body={body} labels={labels} /> },
+    {
+      id: "parameters",
+      title: "Parameters",
+      changed: parameters.changed,
+      content: <FieldsDiff rows={parameters.rows} labelOf={parameterLabel} noun="parameter" oldLabel={labels.old} newLabel={labels.new} />,
+    },
+    {
+      id: "responses",
+      title: "Responses",
+      changed: responses.changed,
+      content:
+        responses.items.length === 0 ? (
+          <p className="muted cmp-empty">No responses documented in either version.</p>
+        ) : (
+          responses.items.map((item) => <ResponseItem key={item.status} item={item} labels={labels} />)
+        ),
+    },
+    { id: "docs", title: "Documentation", changed: docs.changed, content: <DocsSection docs={docs} labels={labels} /> },
+  ];
+  const unchanged = sections.filter((s) => !s.changed);
+  const render = (s) => (
+    <Section key={s.id} id={s.id} title={s.title} changed={s.changed} text={text[s.id]}>
+      {s.content}
+    </Section>
+  );
   return (
     <div className="cmp-sections">
-      <Section id="body" title="Request body" changed={body.changed} text={text.body}>
-        <BodySection body={body} />
-      </Section>
-      <Section id="parameters" title="Parameters" changed={parameters.changed} text={text.parameters}>
-        <FieldsDiff rows={parameters.rows} labelOf={parameterLabel} noun="parameter" />
-      </Section>
-      <Section id="responses" title="Responses" changed={responses.changed} text={text.responses}>
-        {responses.items.length === 0 ? <p className="muted cmp-empty">No responses documented in either version.</p> : responses.items.map((item) => <ResponseItem key={item.status} item={item} />)}
-      </Section>
-      <Section id="docs" title="Documentation" changed={docs.changed} text={text.docs}>
-        <DocsSection docs={docs} />
-      </Section>
+      <ChangeList changes={changes} />
+      {sections.filter((s) => s.changed).map(render)}
+      {unchanged.length > 0 && (
+        <div className="cmp-unchanged">
+          <span className="muted">
+            <Icon name="check" size="14px" /> No changes in {unchanged.map((s) => s.title.toLowerCase()).join(", ")}
+          </span>
+          <button type="button" className="link cmp-toggle" onClick={() => setShowUnchanged(!showUnchanged)} aria-expanded={showUnchanged}>
+            {showUnchanged ? "Hide" : "Show"}
+          </button>
+        </div>
+      )}
+      {showUnchanged && unchanged.map(render)}
     </div>
   );
 }

@@ -23,6 +23,8 @@
   --c-del-edge: #d6382b;
   --c-mod: #fff6e0;
   --c-mod-edge: #e0a100;
+  --c-ren: #eef6ff;
+  --c-ren-edge: #2e90fa;
   --c-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   min-width: 0;
 }
@@ -760,14 +762,34 @@ details[open] > summary > .cmp-caret {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 6px 10px;
-  font-family: inherit;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  padding: 7px 10px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
   text-align: left;
   border-bottom: 1px solid var(--c-border);
+}
+.cmp-th {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cmp-th code {
+  font-family: var(--c-mono);
+  font-weight: 700;
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.cmp-th-tag {
+  padding: 1px 7px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--c-muted);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
 }
 .cmp-diff thead th.older {
   color: var(--c-del-ink);
@@ -856,12 +878,16 @@ details[open] > summary > .cmp-caret {
   color: var(--c-add-ink);
 }
 .cmp-mark {
+  padding: 0 1px;
   border-radius: 3px;
   color: inherit;
+  font-weight: 700;
 }
 .cmp-old .cmp-mark,
 .cmp-u-del .cmp-mark {
   background: #f2a79f;
+  text-decoration: line-through;
+  text-decoration-color: rgba(142, 28, 17, 0.55);
 }
 .cmp-new .cmp-mark,
 .cmp-u-add .cmp-mark {
@@ -916,6 +942,14 @@ details[open] > summary > .cmp-caret {
   color: var(--c-muted);
   background: var(--c-soft);
 }
+/* The version columns: headed by version numbers, which must keep their case. */
+.cmp-fields th:nth-child(2),
+.cmp-fields th:nth-child(3) {
+  font-family: var(--c-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .cmp-fields th:nth-child(2) {
   color: var(--c-del-ink);
   background: var(--c-del);
@@ -938,15 +972,129 @@ details[open] > summary > .cmp-caret {
 .cmp-frow.cmp-f-changed td {
   background: var(--c-mod);
 }
+.cmp-frow.cmp-f-renamed td {
+  background: var(--c-ren);
+}
+/* A coloured edge on each changed row, so the kind of change reads at a glance. */
+.cmp-frow.cmp-f-added td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-add-edge);
+}
+.cmp-frow.cmp-f-removed td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-del-edge);
+}
+.cmp-frow.cmp-f-changed td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-mod-edge);
+}
+.cmp-frow.cmp-f-renamed td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-ren-edge);
+}
 .cmp-frow td.cmp-none {
   color: #8b96aa;
 }
+.cmp-fields th.cmp-fstatus,
 .cmp-fstatus {
-  width: 90px;
+  width: 96px;
   text-align: right;
 }
 .cmp-toggle {
   font-size: 0.84rem;
+}
+.cmp-rename {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--c-muted);
+}
+.cmp-rename-old {
+  text-decoration: line-through;
+  color: var(--c-del-ink);
+}
+.cmp-rename-new {
+  font-weight: 700;
+  color: var(--c-add-ink);
+}
+
+/* ---------- What changed ---------- */
+.cmp-changes {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cmp-change {
+  display: grid;
+  grid-template-columns: 84px minmax(120px, 190px) 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  font-size: 0.88rem;
+  background: var(--c-surface);
+}
+.cmp-change + .cmp-change {
+  border-top: 1px solid var(--c-border);
+}
+.cmp-change > .badge {
+  justify-self: start;
+}
+.cmp-change-area {
+  color: var(--c-muted);
+}
+.cmp-change-what {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cmp-fromto {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cmp-from {
+  padding: 1px 6px;
+  color: var(--c-del-ink);
+  background: var(--c-del);
+  border-radius: 5px;
+  text-decoration: line-through;
+  text-decoration-color: rgba(142, 28, 17, 0.45);
+}
+.cmp-to {
+  padding: 1px 6px;
+  color: var(--c-add-ink);
+  background: var(--c-add);
+  border-radius: 5px;
+  font-weight: 600;
+}
+.cmp-nochange {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--c-muted);
+  background: var(--c-soft);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+}
+.cmp-unchanged {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 0.86rem;
+  background: var(--c-soft);
+  border: 1px dashed var(--c-border);
+  border-radius: 10px;
+}
+.cmp-unchanged > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ---------- Documentation ---------- */
@@ -1111,6 +1259,13 @@ details[open] > summary > .cmp-caret {
   }
 }
 @media (max-width: 640px) {
+  .cmp-change {
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+  }
+  .cmp-change-what {
+    grid-column: 1 / -1;
+  }
   .cmp-close span,
   .cmp-eyebrow,
   .cmp-arrow {

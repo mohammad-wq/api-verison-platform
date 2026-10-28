@@ -148,11 +148,23 @@ export function TextDiff({ rows, oldLabel, newLabel, context = 3, empty = "Nothi
   );
 }
 
-const STATUS_BADGE = {
+export const STATUS_BADGE = {
   added: ["ok", "Added"],
   removed: ["danger", "Removed"],
+  renamed: ["info", "Renamed"],
   changed: ["warn", "Changed"],
 };
+
+function FieldName({ row, labelOf }) {
+  if (row.status !== "renamed") return <code>{labelOf(row.key)}</code>;
+  return (
+    <span className="cmp-rename">
+      <code className="cmp-rename-old">{labelOf(row.oldKey)}</code>
+      <Icon name="arrowRight" size="13px" />
+      <code className="cmp-rename-new">{labelOf(row.key)}</code>
+    </span>
+  );
+}
 
 /** A field-by-field table: Older | Newer | Change, unchanged rows tucked behind a toggle. */
 export function FieldsDiff({ rows, labelOf = (key) => key, oldLabel = "Older", newLabel = "Newer", noun = "field" }) {
@@ -169,14 +181,14 @@ export function FieldsDiff({ rows, labelOf = (key) => key, oldLabel = "Older", n
             <th>{noun[0].toUpperCase() + noun.slice(1)}</th>
             <th>{oldLabel}</th>
             <th>{newLabel}</th>
-            <th />
+            <th className="cmp-fstatus">Change</th>
           </tr>
         </thead>
         <tbody>
           {visible.map((row) => (
             <tr key={row.key} className={`cmp-frow cmp-f-${row.status}`}>
               <td>
-                <code>{labelOf(row.key)}</code>
+                <FieldName row={row} labelOf={labelOf} />
               </td>
               <td className={row.old ? "" : "cmp-none"}>{row.old ? describeEntry(row.old) : "—"}</td>
               <td className={row.new ? "" : "cmp-none"}>{row.new ? describeEntry(row.new) : "—"}</td>
