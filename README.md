@@ -14,13 +14,30 @@ No Node.js, MySQL, accounts or web-server setup is needed.
 
 ## Quick start
 
+Install the package:
+
 ```bash
 composer require --dev mohammad-wq/api-version-platform
+```
 
-vendor/bin/avp init                      # writes avp.config.php and creates .avp/
+Then run the CLI straight from `vendor/bin`. Use the path for your shell.
+
+**macOS / Linux / Git Bash:**
+
+```bash
+vendor/bin/avp init                          # writes avp.config.php and creates .avp/
 vendor/bin/avp template --output=README.md   # skip if your README already follows the template
 vendor/bin/avp version create v1.0.0 --note="First version"
-vendor/bin/avp serve                     # http://127.0.0.1:8080
+vendor/bin/avp serve                         # http://127.0.0.1:8080
+```
+
+**Windows PowerShell:**
+
+```powershell
+.\vendor\bin\avp init                          # writes avp.config.php and creates .avp/
+.\vendor\bin\avp template --output=README.md   # skip if your README already follows the template
+.\vendor\bin\avp version create v1.0.0 --note="First version"
+.\vendor\bin\avp serve                         # http://127.0.0.1:8080
 ```
 
 Add the local state to your project's `.gitignore`:
@@ -29,7 +46,42 @@ Add the local state to your project's `.gitignore`:
 /.avp/
 ```
 
+### Optional: a Composer shortcut
+
+To type `composer avp` instead of the full path, add a script to your project's `composer.json`:
+
+```json
+{
+    "scripts": {
+        "avp": "vendor/bin/avp"
+    }
+}
+```
+
+The same command then works in every shell:
+
+```bash
+composer avp init
+composer avp status
+composer avp serve
+```
+
+If a command takes flags (anything starting with `--`), put `--` after `avp`. Without it, Composer reads the flags itself and stops with an error:
+
+```bash
+composer avp -- template --output=README.md
+composer avp -- version create v1.0.0 --note="First version"
+```
+
 ## CLI
+
+The commands below are shown as `avp`. Replace `avp` with how you run it:
+
+| Shell | Run as |
+| --- | --- |
+| macOS / Linux / Git Bash | `vendor/bin/avp` |
+| Windows PowerShell | `.\vendor\bin\avp` |
+| Composer script (any shell) | `composer avp --` |
 
 ```text
 avp init [--force]
@@ -53,6 +105,13 @@ Every command accepts `--config=PATH`. `avp-serve` is kept as an alias of `avp`.
 | `missing` / `invalid` | README cannot be read, or has no endpoints | 1 |
 
 Line-ending (CRLF/LF) and UTF-8 BOM differences do not count as changes.
+
+### Troubleshooting and Windows notes
+
+- **`vendor/bin/avp` is not recognized in PowerShell.** PowerShell needs `.\` in front and backslashes: `.\vendor\bin\avp`. The forward-slash path only works in Git Bash, WSL, macOS and Linux.
+- **`The "--output" option does not exist.`** You ran a Composer script and Composer read the flag itself. Put `--` after the script name: `composer avp -- template --output=README.md`.
+- **`Command "avp" is not defined.`** Your project's `composer.json` has no `avp` script. Add the script shown in [Quick start](#optional-a-composer-shortcut), or run the file directly.
+- **When in doubt, run the file directly.** `vendor/bin/avp` (or `.\vendor\bin\avp` in PowerShell) works without any `composer.json` setup and passes your flags through unchanged, so it's the most reliable way to run the tool.
 
 ## Web UI
 
