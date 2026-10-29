@@ -1,5 +1,5 @@
 {
-    "name": "mohammad/api-version-platform",
+    "name": "mohammad-wq/api-version-platform",
     "description": "Local README-to-OpenAPI versioning for PHP projects.",
     "type": "library",
     "license": "MIT",

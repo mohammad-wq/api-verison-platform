@@ -1,4 +1,4 @@
-# mohammad/api-version-platform
+# mohammad-wq/api-version-platform
 
 Version your API documentation locally. Write your API in a README using the bundled Markdown template; the platform turns it into OpenAPI 3.0, keeps every version in a local SQLite database, and gives you the full API Version Platform web UI (version history, diffs, OpenAPI viewer and an API tester) on `localhost`.
 
@@ -15,7 +15,7 @@ No Node.js, MySQL, accounts or web-server setup is needed.
 ## Quick start
 
 ```bash
-composer require --dev mohammad/api-version-platform
+composer require --dev mohammad-wq/api-version-platform
 
 vendor/bin/avp init                      # writes avp.config.php and creates .avp/
 vendor/bin/avp template --output=README.md   # skip if your README already follows the template
