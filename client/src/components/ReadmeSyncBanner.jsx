@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useAction } from "../hooks.js";
 import { Icon } from "./icons.jsx";
@@ -8,9 +8,14 @@ const POLL_MS = 10000;
 /**
  * Local mode only: the tracked README is not watched by the server, so this checks it (every few seconds and
  * when the tab regains focus) and offers to save the edited file as the next version. Hidden when nothing changed.
+ *
+ * The next version number is a suggestion, not a lock: the field is editable, like the version field in the
+ * "Add a new version" form.
  */
 export default function ReadmeSyncBanner({ onSaved }) {
   const [status, setStatus] = useState(null);
+  const [label, setLabel] = useState("");
+  const [labelTouched, setLabelTouched] = useState(false);
   const [note, setNote] = useState("");
   const [dismissed, setDismissed] = useState(null); // the "changed since" version the user dismissed
   const { busy, error, run } = useAction();
@@ -26,6 +31,16 @@ export default function ReadmeSyncBanner({ onSaved }) {
     };
   }, [check]);
 
+  // Put a newly suggested number into the field once, but never put it back after the author edited or
+  // cleared the field.
+  const suggestion = status?.nextVersionNumber ?? "";
+  const lastSuggestion = useRef(suggestion);
+  useEffect(() => {
+    if (suggestion === lastSuggestion.current) return;
+    lastSuggestion.current = suggestion;
+    if (!labelTouched) setLabel(suggestion);
+  }, [suggestion, labelTouched]);
+
   if (!status?.exists || !status.hasChanges || dismissed === status.latestVersionNumber) return null;
   const { summary } = status;
   const parts = summary
@@ -35,11 +50,15 @@ export default function ReadmeSyncBanner({ onSaved }) {
         summary.endpointsChanged && `${summary.endpointsChanged} changed`,
       ].filter(Boolean)
     : [];
+  const draftLabel = label.trim();
+  const effectiveLabel = draftLabel || suggestion;
 
   const save = async () => {
-    const saved = await run(() => api.saveReadme(note));
+    const saved = await run(() => api.saveReadme({ label: draftLabel, note }));
     if (saved) {
       setNote("");
+      setLabel("");
+      setLabelTouched(false);
       await check();
       onSaved?.(saved);
     }
@@ -55,6 +74,18 @@ export default function ReadmeSyncBanner({ onSaved }) {
         {error && <span className="readme-sync-error"> · {error.message}</span>}
       </span>
       <input
+        className="readme-sync-label"
+        value={label}
+        onChange={(event) => {
+          setLabelTouched(true);
+          setLabel(event.target.value);
+        }}
+        placeholder={suggestion || "Version"}
+        aria-label="Version number"
+        maxLength={50}
+        onKeyDown={(event) => event.key === "Enter" && !busy && save()}
+      />
+      <input
         className="readme-sync-note"
         value={note}
         onChange={(event) => setNote(event.target.value)}
@@ -63,8 +94,8 @@ export default function ReadmeSyncBanner({ onSaved }) {
         maxLength={190}
         onKeyDown={(event) => event.key === "Enter" && !busy && save()}
       />
-      <button className="btn btn-small btn-primary" onClick={save} disabled={busy}>
-        {busy ? "Saving…" : `Save as ${status.nextVersionNumber}`}
+      <button className="btn btn-small btn-primary" onClick={save} disabled={busy || !effectiveLabel}>
+        {busy ? "Saving…" : `Save as ${effectiveLabel}`}
       </button>
       <button className="btn btn-small btn-ghost" onClick={() => setDismissed(status.latestVersionNumber)} aria-label="Dismiss until the next version">
         <Icon name="close" />

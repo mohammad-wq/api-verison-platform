@@ -103,11 +103,19 @@ final class LocalApi
         ];
     }
 
+    /** Saves the working README as a version. The client sends the label it showed; otherwise the next one is suggested. */
     /** @return array<string, mixed> */
     private function saveReadme(): array
     {
-        $note = trim((string) ($this->input()['note'] ?? ''));
-        $created = $this->versions->create($this->versions->nextLabel(), $note);
+        $data = $this->input();
+        $label = trim((string) ($data['label'] ?? ''));
+        if ($label === '') {
+            $label = $this->versions->nextLabel();
+        } elseif (strlen($label) > 50) {
+            throw new \InvalidArgumentException('Version label is too long (50 characters maximum)');
+        }
+        $note = trim((string) ($data['note'] ?? ''));
+        $created = $this->versions->create($label, $note);
         return $this->versionRow($this->versions->byId((int) $created['id']) ?? [], true);
     }
 

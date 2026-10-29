@@ -58,7 +58,7 @@ Line-ending (CRLF/LF) and UTF-8 BOM differences do not count as changes.
 
 `avp serve` opens the same interface as the hosted platform, running as a single local project:
 
-- **README banner**: when the configured README changes, the UI shows what changed (endpoints added, removed or changed) and saves it as the next version in one click.
+- **README banner**: when the configured README changes, the UI shows what changed (endpoints added, removed or changed) and saves it as a new version in one click. The suggested version number is prefilled but editable, like the version field in the Add a new version form.
 - **Versions**: upload or paste README Markdown or OpenAPI JSON, review it, and save it as a version; view, edit, compare and delete versions.
 - **Test APIs**: send requests to your API using environments (base URLs) you define. Requests are sent by the local PHP server, so CORS does not apply.
 - **History**: requests sent from the tester, stored locally.

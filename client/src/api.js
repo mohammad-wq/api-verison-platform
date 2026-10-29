@@ -359,7 +359,7 @@ const postVersion = (payload) => post("/versions/modify/insertUpdateVersion.php"
 export const api = {
   // local mode: retained for the standalone npm client; this web API does not expose these routes.
   readmeStatus: () => get("/local/readme"),
-  saveReadme: (note) => post("/local/readme/save", { note }),
+  saveReadme: ({ label, note } = {}) => post("/local/readme/save", { label, note }),
 
   // auth
   register: async (email, password, name) => {

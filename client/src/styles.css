@@ -4139,6 +4139,7 @@ input[aria-invalid="true"] {
 .readme-sync-error {
   color: var(--danger, #b42318);
 }
+.readme-sync-label,
 .readme-sync-note {
   flex: 0 1 200px;
   min-width: 120px;
@@ -4147,6 +4148,11 @@ input[aria-invalid="true"] {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
+}
+.readme-sync-label {
+  flex: 0 1 110px;
+  min-width: 90px;
+  font-weight: 600;
 }
 
 @media (max-width: 760px) {
