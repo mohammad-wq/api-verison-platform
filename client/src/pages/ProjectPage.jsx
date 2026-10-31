@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
-import { useAction, useAsync, usePersistentState } from "../hooks.js";
+import { useAction, useAsync } from "../hooks.js";
 import { Avatar, ErrorBanner, RolePill, Skeleton, formatDate, useCrumb, usePopover } from "../components/ui.jsx";
 import { ProjectDetailsForm } from "../components/ApiAuthSettings.jsx";
 import { Icon } from "../components/icons.jsx";
@@ -55,12 +55,18 @@ export default function ProjectPage() {
   const [params, setParams] = useSearchParams();
   // Collaborators and project deletion need the hosted server. Read at render time: mode is detected after module load.
   const visibleTabs = mode.local ? TABS.filter((t) => t.id !== "members") : TABS;
-  // The URL wins; otherwise reopen the tab this project was last viewed on.
-  const [savedTab, setSavedTab] = usePersistentState(`project.${projectId}.tab`, "versions");
-  const fromUrl = visibleTabs.some((t) => t.id === params.get("tab")) ? params.get("tab") : null;
-  const tab = fromUrl ?? (visibleTabs.some((t) => t.id === savedTab) ? savedTab : "versions");
+  // The tab comes from the URL: `?tab=` when there is one, Versions on a plain project link.
+  // Keeping it purely in the URL (no localStorage) makes every link deterministic.
+  const defaultTab = visibleTabs.some((t) => t.id === params.get("tab")) ? params.get("tab") : "versions";
+  const [tab, setTab] = useState(defaultTab);
+  const [urlTab, setUrlTab] = useState(defaultTab);
+  // A different URL wins on navigation/refresh (back/forward, bookmarks, `/projects/1?tab=history`).
+  if (defaultTab !== urlTab) {
+    setUrlTab(defaultTab);
+    setTab(defaultTab);
+  }
   const selectTab = (id) => {
-    setSavedTab(id);
+    setTab(id);
     setParams({ tab: id });
   };
   const project = useAsync(() => api.getProject(projectId), [projectId]);

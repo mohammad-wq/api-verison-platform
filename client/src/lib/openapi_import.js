@@ -1,5 +1,3 @@
-import { parseMarkdownToOpenApi } from "../parser/index.js";
-
 export const MAX_OPENAPI_IMPORT_BYTES = 5 * 1024 * 1024;
 const METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 const PARAMETER_LOCATIONS = new Set(["query", "header", "path", "cookie"]);
@@ -435,8 +433,14 @@ export function validateOpenApiDocument(spec) {
   return errors;
 }
 
-/** Parse file or pasted content as JSON or README Markdown without making an API request. */
-export function prepareOpenApiImport(text, { filename = "" } = {}) {
+/**
+ * Parse file or pasted content as OpenAPI JSON, or as README Markdown via the server's parser.
+ *
+ * `parseMarkdown` must be provided for Markdown input — it calls the platform API (or anything
+ * returning `{ openapi, warnings, statistics }`). There is deliberately no bundled JavaScript
+ * parser: the CLI and the UI must parse a README with the same code, or the results drift.
+ */
+export async function prepareOpenApiImport(text, { filename = "", parseMarkdown } = {}) {
   if (typeof text !== "string" || text.trim() === "") throw new Error("The selected file or text is empty.");
   if (new TextEncoder().encode(text).byteLength > MAX_OPENAPI_IMPORT_BYTES) throw new Error("Input must not exceed 5 MB.");
 
@@ -459,14 +463,22 @@ export function prepareOpenApiImport(text, { filename = "" } = {}) {
       throw new Error(`"${filename}" has a .json extension, but its contents are not JSON.`);
     }
     sourceType = "markdown";
+    if (typeof parseMarkdown !== "function") {
+      throw new Error(
+        "Parsing README Markdown requires the platform server. Start the local server (`avp serve`) and open the UI through it, or import an OpenAPI JSON document instead.",
+      );
+    }
     let parsed;
     try {
-      parsed = parseMarkdownToOpenApi(text);
+      parsed = await parseMarkdown(text);
     } catch (error) {
       throw new Error(`Could not parse README Markdown: ${error instanceof Error ? error.message : String(error)}`);
     }
+    if (!parsed || typeof parsed !== "object" || !parsed.openapi || typeof parsed.openapi !== "object") {
+      throw new Error("The README parser did not return an OpenAPI document.");
+    }
     openapi = parsed.openapi;
-    warnings = parsed.warnings ?? [];
+    warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
     statistics = parsed.statistics ?? null;
   }
 

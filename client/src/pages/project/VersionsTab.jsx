@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api.js";
-import { useAction, useAsync, usePersistentState } from "../../hooks.js";
+import { useAction, useAsync } from "../../hooks.js";
 import { Avatar, Badge, EmptyState, ErrorBanner, JsonView, Modal, Notice, Skeleton, SkeletonList, formatBytes, formatDate, timeAgo } from "../../components/ui.jsx";
 import { Icon } from "../../components/icons.jsx";
 import { FindBar, findShortcut, useFind } from "../../components/find.jsx";
@@ -96,9 +96,11 @@ function ImportPanel({ projectId, versions = [], onImported }) {
   const [mode, setMode] = usePersistentState(`ver.${projectId}.mode`, "file");
   const [file, setFile] = usePersistentState(`ver.${projectId}.file`, null, { memoryOnly: true });
   const [text, setText] = usePersistentState(`ver.${projectId}.text`, "");
-  const [versionNumber, setVersionNumber] = usePersistentState(`ver.${projectId}.number`, "");
-  const [versionNumberTouched, setVersionNumberTouched] = useState(() => Boolean(versionNumber.trim()));
-  const [note, setNote] = usePersistentState(`ver.${projectId}.note`, "");
+  // Version number and note need no persistence: the number is re-suggested from the version list
+  // on every mount, so a version saved elsewhere never leaves this form with a stale suggestion.
+  const [versionNumber, setVersionNumber] = useState("");
+  const [versionNumberTouched, setVersionNumberTouched] = useState(false);
+  const [note, setNote] = useState("");
   const [prepared, setPrepared] = useState(null);
   const [reviewText, setReviewText] = useState("");
   const [result, setResult] = useState(null);
@@ -153,7 +155,7 @@ function ImportPanel({ projectId, versions = [], onImported }) {
     const preparedImport = await run(async () => {
       if (mode === "file" && file.size > MAX_OPENAPI_IMPORT_BYTES) throw new Error("Input must not exceed 5 MB.");
       const source = mode === "file" ? await file.text() : text;
-      return prepareOpenApiImport(source, { filename: mode === "file" ? file.name : "" });
+      return prepareOpenApiImport(source, { filename: mode === "file" ? file.name : "", parseMarkdown: api.parseReadme });
     });
     if (preparedImport) {
       setPrepared(preparedImport);
@@ -420,10 +422,23 @@ function SpecEditor({ version, onSaved, onCancel }) {
   );
 }
 
-function VersionViewer({ versionId, canEdit, onChanged, onClose }) {
+function VersionViewer({ versionId, canEdit, onChanged, onDeleted, onClose }) {
   const version = useAsync(() => api.getVersion(versionId), [versionId]);
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  // Deleting a version is confirmed with the app's confirm bar, not window.confirm.
+  const removal = useAction();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const remove = async () => {
+    const done = await removal.run(async () => {
+      await api.deleteVersion(version.data.id);
+      return true;
+    });
+    if (done) {
+      setConfirmDelete(false);
+      onDeleted();
+    }
+  };
   const jumpOptions = useMemo(() => jumpOptionsOf(version.data?.openapiJson), [version.data]);
 
   const download = () => {
@@ -472,11 +487,31 @@ function VersionViewer({ versionId, canEdit, onChanged, onClose }) {
               <Icon name="download" /> Download JSON
             </button>
           )}
+          {!collapsed && version.data && canEdit && (
+            <button className="btn btn-ghost" onClick={() => setConfirmDelete(true)} title="Delete this version">
+              <Icon name="trash" /> Delete version
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={onClose}>
             <Icon name="close" /> Close
           </button>
         </div>
       </div>
+      {confirmDelete && version.data && (
+        <div className="confirm-bar" role="alertdialog" aria-label="Confirm version deletion">
+          <Icon name="alert" />
+          <span className="grow">
+            <strong>Delete version {version.data.versionNumber}?</strong> Comparisons that include it lose one side. This cannot be undone.
+          </span>
+          <button className="btn btn-danger-solid" onClick={remove} disabled={removal.busy}>
+            {removal.busy ? "Deleting…" : "Yes, delete"}
+          </button>
+          <button className="btn" onClick={() => setConfirmDelete(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {confirmDelete && <ErrorBanner error={removal.error} onDismiss={() => removal.setError(null)} />}
       {/* Kept mounted while collapsed so search hits, editor drafts and scroll position survive. */}
       <div className="viewer-body" style={collapsed ? { display: "none" } : undefined}>
       {version.loading && !version.data && <Skeleton h={220} r={10} />}
@@ -640,7 +675,16 @@ export default function VersionsTab({ project, can, reloadProject, goToTab }) {
           onChanged={(result, asNew) => {
             setComparison(null);
             versions.reload();
+            // The JSON editor saves outside the import form, so the project (its sidebar version
+            // count and latest-version label) must be refreshed too.
+            reloadProject();
             if (asNew) setViewing(result.id);
+          }}
+          onDeleted={() => {
+            setViewing(null);
+            setComparison(null);
+            versions.reload();
+            reloadProject();
           }}
           onClose={() => setViewing(null)}
         />

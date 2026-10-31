@@ -134,6 +134,13 @@ function Chips({ list }) {
   );
 }
 
+/** "changed" normally; "added"/"removed" when the endpoint exists on one side only. */
+function LifecycleBadge({ docs, item }) {
+  if (docs.added) return <Badge kind="ok">added</Badge>;
+  if (docs.removed) return <Badge kind="danger">removed</Badge>;
+  return <Badge kind="warn">changed</Badge>;
+}
+
 function DocsSection({ docs, labels }) {
   return (
     <div className="cmp-docs">
@@ -153,7 +160,7 @@ function DocsSection({ docs, labels }) {
         item.rows ? (
           <div key={item.label} className="cmp-doc-block">
             <div className="cmp-doc-label">
-              {item.label} {item.changed && <Badge kind="warn">changed</Badge>}
+              {item.label} {item.changed && <LifecycleBadge docs={docs} item={item} />}
             </div>
             {item.rows.length ? <TextDiff rows={item.rows} oldLabel={<SideLabel version={labels.old} />} newLabel={<SideLabel version={labels.new} />} context={2} /> : <span className="muted">none in either version</span>}
           </div>
@@ -161,14 +168,8 @@ function DocsSection({ docs, labels }) {
           <div key={item.label} className="cmp-doc-row">
             <span className="cmp-doc-label">{item.label}</span>
             <span className="cmp-doc-pair">
-              <Chips list={item.old} />
-              {item.changed && (
-                <>
-                  <span aria-hidden="true">→</span>
-                  <Chips list={item.new} />
-                  <Badge kind="warn">changed</Badge>
-                </>
-              )}
+              <Chips list={docs.added ? item.new ?? [] : item.old ?? []} />
+              {item.changed && <LifecycleBadge docs={docs} item={item} />}
             </span>
           </div>
         ),

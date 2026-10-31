@@ -10,6 +10,7 @@ final class MarkdownOpenApiParser
 
     private array $warnings = [];
     private array $endpoints = [];
+    private array $servers = [];
     private array $paginationParameters = [];
     private array $publicTargets = [];
     private array $sectionsForTag = [];
@@ -47,9 +48,22 @@ final class MarkdownOpenApiParser
         $paths = [];
         $methods = [];
         $tags = [];
+        $usedOperationIds = [];
         foreach ($this->endpoints as $endpoint) {
             $operation = $this->toOperation($endpoint);
-            $paths[$endpoint['path']][strtolower($endpoint['method'])] = $operation;
+            $operation['operationId'] = $this->operationId($endpoint['method'], $endpoint['path'], $usedOperationIds);
+            $method = strtolower($endpoint['method']);
+            // OpenAPI keys operations by path+method, so a repeated table row would silently
+            // overwrite the earlier one here and lose its detail. Say so instead.
+            if (isset($paths[$endpoint['path']][$method])) {
+                $this->warn(
+                    'DUPLICATE_ENDPOINT',
+                    "{$endpoint['method']} {$endpoint['path']} is documented more than once; the last row wins.",
+                    [$endpoint['line'] ?? 1, $endpoint['line'] ?? 1],
+                    $endpoint,
+                );
+            }
+            $paths[$endpoint['path']][$method] = $operation;
             $methods[$endpoint['method']] = ($methods[$endpoint['method']] ?? 0) + 1;
             if ($endpoint['tag'] !== '') {
                 $tags[$endpoint['tag']] = true;
@@ -75,6 +89,9 @@ final class MarkdownOpenApiParser
         ];
         if ($this->description !== '') {
             $openapi['info']['description'] = $this->description;
+        }
+        if ($this->servers) {
+            $openapi['servers'] = array_values($this->servers);
         }
         if ($tags) {
             $openapi['tags'] = array_map(
@@ -143,6 +160,12 @@ final class MarkdownOpenApiParser
                 $i++;
                 continue;
             }
+            // A horizontal rule is structural, not content: it must never be captured as
+            // endpoint text (it would otherwise surface as summaries like "---").
+            if (preg_match('/^(?:-{3,}|\*{3,}|_{3,})\s*$/', $trimmed)) {
+                $i++;
+                continue;
+            }
             if (preg_match('/^(```+|~~~+)\s*([\w-]*)/', $trimmed, $fence)) {
                 $start = $i + 1;
                 $content = [];
@@ -193,11 +216,12 @@ final class MarkdownOpenApiParser
             }
 
             $start = $i + 1;
-            $paragraph = [];
-            while ($i < $count) {
+            $paragraph = [];             while ($i < $count) {
                 $current = trim($lines[$i]);
                 if ($current === '' ||
                     preg_match('/^(?:#{1,6}\s+|```+|~~~+)/', $current) ||
+                    // A rule ends the paragraph ("Title text\n---" is not one sentence with "---").
+                    preg_match('/^(?:-{3,}|\*{3,}|_{3,})\s*$/', $current) ||
                     (str_starts_with($current, '|') && isset($lines[$i + 1]) && preg_match('/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/', $lines[$i + 1]))) {
                     break;
                 }
@@ -376,8 +400,103 @@ final class MarkdownOpenApiParser
                     preg_match_all('/`([^`]+)`/', $match[1], $public);
                     $this->publicTargets = array_merge($this->publicTargets, $public[1]);
                 }
+                if (preg_match('/^Environments?:\s*(.+)$/im', $block['text'], $environmentLine)) {
+                    $this->readEnvironmentLine($environmentLine[1], $block['lines']);
+                }
+                if (preg_match('/^Servers?:\s*(?:`([^`\s]+)`|(\S+))\s*$/im', $block['text'], $serverLine)) {
+                    $url = trim($serverLine[1] ?? $serverLine[2], '`');
+                    $canonical = $this->normalizeServerUrl($url);
+                    if ($canonical === null) {
+                        $this->warn('INVALID_SERVER', "Invalid server URL \"{$url}\"; use an HTTP(S) URL without credentials, query, or fragment.", $block['lines']);
+                    } elseif (!in_array($canonical, array_column($this->servers, 'url'), true)) {
+                        $this->servers[] = ['url' => $canonical];
+                    }
+                }
             }
         }
+    }
+
+    /** One `Environments:` entry → one server, carrying the UI's login conventions as x-login-*. */
+    private function readEnvironmentLine(string $line, array $blockLines): void
+    {
+        foreach (explode(';', $line) as $entry) {
+            $entry = trim($entry);
+            if ($entry === '') {
+                continue;
+            }
+            $settingErrors = false;
+            if (!preg_match('/^([^=]+?)\s*=\s*([^|]+)$/i', explode('|', $entry)[0], $nameAndUrl, PREG_UNMATCHED_AS_NULL)) {
+                $this->warn('INVALID_SERVER', "Invalid environment entry \"{$entry}\"; expected Name=https://host", $blockLines);
+                continue;
+            }
+            $name = trim($nameAndUrl[1]);
+            $canonical = $this->normalizeServerUrl($nameAndUrl[2]);
+            if ($canonical === null) {
+                $this->warn('INVALID_SERVER', "Invalid server URL \"{$nameAndUrl[2]}\" in environment entry \"{$entry}\".", $blockLines);
+                continue;
+            }
+            $server = ['url' => $canonical, 'description' => $name];
+            foreach (array_slice(explode('|', $entry), 1) as $setting) {
+                $pieces = explode('=', $setting);
+                $key = array_shift($pieces);
+                $normalizedKey = strtolower(trim((string) $key));
+                $value = trim(implode('=', $pieces));
+                if ($value === '' || !in_array($normalizedKey, ['login', 'token', 'method'], true)) {
+                    $this->warn('INVALID_SERVER', "Invalid environment entry \"{$entry}\"; unknown or empty setting \"{$setting}\".", $blockLines);
+                    $settingErrors = true;
+                    break;
+                }
+                if ($normalizedKey === 'login') {
+                    if (str_starts_with($value, '/') && !preg_match('/[\s?#]/', $value)) {
+                        $server['x-login-url'] = rtrim($value, '/');
+                    } else {
+                        $loginUrl = $this->normalizeServerUrl($value);
+                        if ($loginUrl === null) {
+                            $this->warn('INVALID_SERVER', "Invalid environment entry \"{$entry}\"; login must be an absolute HTTP(S) URL or a path beginning with /.", $blockLines);
+                            $settingErrors = true;
+                            break;
+                        }
+                        $server['x-login-url'] = $loginUrl;
+                    }
+                } elseif ($normalizedKey === 'token') {
+                    $server['x-token-path'] = $value;
+                } else {
+                    $method = strtoupper($value);
+                    if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+                        $this->warn('INVALID_SERVER', "Invalid environment entry \"{$entry}\"; invalid login method \"{$value}\".", $blockLines);
+                        $settingErrors = true;
+                        break;
+                    }
+                    $server['x-login-method'] = $method;
+                }
+            }
+            if (!$settingErrors) {
+                $this->servers[] = $server;
+            }
+        }
+    }
+
+    /** A server URL must be absolute HTTP(S) with no credentials, query or fragment; trailing slashes are dropped. */
+    private function normalizeServerUrl(string $url): ?string
+    {
+        $url = trim($url);
+        if ($url === '' || preg_match('/[\s,\'"\\#<>(){}]/', $url)) {
+            return null;
+        }
+        $parts = parse_url($url);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            return null;
+        }
+        if (!isset($parts['host']) || $parts['host'] === '') {
+            return null;
+        }
+        if (isset($parts['query']) || isset($parts['fragment'])) {
+            return null;
+        }
+        $authority = isset($parts['port']) ? $parts['host'] . ':' . $parts['port'] : $parts['host'];
+        $url = $scheme . '://' . $authority . ($parts['path'] ?? '');
+        return rtrim($url, '/');
     }
 
     private function applyPublicTargets(): void
@@ -432,11 +551,17 @@ final class MarkdownOpenApiParser
     {
         $header = strtolower(trim(str_replace(['`', '*', '_', '-'], ' ', $header)));
         $header = preg_replace('/\s+/', ' ', $header);
-        if (in_array($header, ['http method', 'verb'], true)) {
+        if (in_array($header, ['http method', 'verb', 'http verb'], true)) {
             return 'method';
         }
-        if (in_array($header, ['path', 'route', 'url', 'resource', 'endpoint path', 'api path'], true)) {
+        if (in_array($header, ['path', 'route', 'url', 'resource', 'endpoint path', 'api path', 'api route'], true)) {
             return 'endpoint';
+        }
+        if ($header === 'permissions') {
+            return 'permission';
+        }
+        if (in_array($header, ['authentication', 'auth column'], true)) {
+            return 'auth';
         }
         return $header;
     }
@@ -444,6 +569,19 @@ final class MarkdownOpenApiParser
     private function readEndpointTable(array $table, array $headers, array $section, array $sections): void
     {
         $columns = array_flip($headers);
+        // Cells in unrecognized columns would otherwise be silently dropped while the user
+        // believes their data is in the spec. Say which columns are being set aside.
+        $unknownColumns = array_values(array_unique(array_diff(
+            array_filter($headers, fn(string $header): bool => $header !== ''),
+            ['method', 'endpoint', 'description', 'permission', 'auth'],
+        )));
+        if ($unknownColumns) {
+            $this->warn(
+                'UNRECOGNIZED_COLUMN',
+                'Column(s) ' . implode(', ', $unknownColumns) . ' are not recognized; their cells are ignored.',
+                $table['lines'],
+            );
+        }
         foreach ($table['rows'] as $row) {
             $cells = $row['cells'];
             $methods = $this->parseMethods($cells[$columns['method']] ?? '');
@@ -454,38 +592,39 @@ final class MarkdownOpenApiParser
                 continue;
             }
             [$path, $query, $unresolved] = $this->resolvePath($target, $section, $sections);
-            $description = $cells[$columns['description']] ?? '';
-            $auth = $this->authValue($cells[$columns['auth']] ?? '');
-            $permissionText = $cells[$columns['permission']] ?? '';
+            $description = $cells[$columns['description'] ?? '\x00'] ?? '';
+            $auth = isset($columns['auth']) ? $this->authValue($cells[$columns['auth']] ?? '') : null;
+            $permissionText = $cells[$columns['permission'] ?? '\x00'] ?? '';
             if (!isset($columns['permission']) && isset($columns['auth']) && $auth === null) {
                 $permissionText = $cells[$columns['auth']];
-            }
-            foreach ($methods as $method) {
-                $endpoint = $this->newEndpoint($method, $path, $section, $row['line'], $description);
-                $endpoint['tableId'] = $table['lines'][0];
-                $endpoint['detailSectionIds'][] = $section['id'];
-                $endpoint['query'] = $query;
-                $endpoint['permission'] = $this->parsePermissions($permissionText);
-                if ($auth !== null) {
-                    $endpoint['public'] = !$auth;
-                }
-                $endpoint['public'] = $endpoint['public'] ?? $this->authValue($description) === false;
-                $endpoint['description'] = $this->cleanDescription($description);
-                $endpoint['request']['parameters'] = array_merge(
-                    $endpoint['request']['parameters'],
-                    $this->queryTemplateParameters($query, $row['line'])
-                );
-                $endpoint['request']['parameters'] = array_merge(
-                    $endpoint['request']['parameters'],
-                    $this->parseMentionedQueryParams($description, [$row['line'], $row['line']])
-                );
-                if (preg_match('/^Paginated\b/i', $this->stripInline($description))) {
-                    $endpoint['request']['parameters'] = array_merge($endpoint['request']['parameters'], $this->paginationParameters);
-                }
-                $endpoint['request']['parameters'] = array_merge(
-                    $endpoint['request']['parameters'],
-                    $this->parseHeaderParameters($description, [$row['line'], $row['line']])
-                );
+            }                foreach ($methods as $method) {
+                    $endpoint = $this->newEndpoint($method, $path, $section, $row['line'], $description);
+                    $endpoint['tableId'] = $table['lines'][0];
+                    $endpoint['detailSectionIds'][] = $section['id'];
+                    $endpoint['query'] = $query;
+                    $endpoint['permission'] = $this->parsePermissions($permissionText);
+                    if ($auth !== null) {
+                        $endpoint['public'] = !$auth;
+                    }
+                    $endpoint['public'] = $endpoint['public'] ?? $this->authValue($description) === false;
+                    $endpoint['description'] = $this->cleanDescription($description);
+                    // Every parameter source funnels through addParameter(), which dedupes by
+                    // name+in — otherwise `?search=` in the path template and a `?search=` mention
+                    // in the description each end up as their own parameter.
+                    foreach ($this->queryTemplateParameters($query, $row['line']) as $parameter) {
+                        $this->addParameter($endpoint, $parameter);
+                    }
+                    foreach ($this->parseMentionedQueryParams($description, [$row['line'], $row['line']]) as $parameter) {
+                        $this->addParameter($endpoint, $parameter);
+                    }
+                    if (preg_match('/^Paginated\b/i', $this->stripInline($description))) {
+                        foreach ($this->paginationParameters as $parameter) {
+                            $this->addParameter($endpoint, $parameter);
+                        }
+                    }
+                    foreach ($this->parseHeaderParameters($description, [$row['line'], $row['line']]) as $parameter) {
+                        $this->addParameter($endpoint, $parameter);
+                    }
                 $this->applyShorthand($endpoint, $targetCell);
                 $this->applyDescriptionFacts($endpoint, $description);
                 if ($unresolved) {
@@ -884,6 +1023,21 @@ final class MarkdownOpenApiParser
                 ];
             }
         }
+    }
+
+    /** Every operation gets a unique operationId derived from its method and path (`get_widgets_list_php`, `_2` on collisions). */
+    private function operationId(string $method, string $path, array &$used): string
+    {
+        $base = strtolower($method) . '_' . trim((string) preg_replace('/[^A-Za-z0-9]+/', '_', ltrim($path, '/')), '_');
+        if ($base === '' || $base === strtolower($method) . '_') {
+            $base = strtolower($method) . '_root';
+        }
+        $id = $base;
+        for ($n = 2; isset($used[$id]); $n++) {
+            $id = $base . '_' . $n;
+        }
+        $used[$id] = true;
+        return $id;
     }
 
     private function parseMethods(string $text): array
@@ -1314,6 +1468,9 @@ final class MarkdownOpenApiParser
     {
         $text = $this->stripInline($text);
         $text = preg_replace('/\bAuth\s*:\s*(?:true|false)\b[.!]?/i', '', $text);
+        // A bare horizontal rule is structure, never endpoint wording (it otherwise
+        // surfaces as summaries like "---" and descriptions ending in "---").
+        $text = preg_replace('/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/m', '', $text);
         return trim(preg_replace('/\s{2,}/', ' ', $text));
     }
 

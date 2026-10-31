@@ -1,17 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseMarkdownToOpenApi } from "../parser/index.js";
 import { operationsForSpec } from "./openapi-endpoints.js";
 import { detectAuthConfig, expiryFrom, jwtExpiry, normalizeHeaderFormat, resolveAuthConfig, tokenStatus } from "./auth-config.js";
 
-const template = readFileSync(new URL("../templates/API_README_TEMPLATE.md", import.meta.url), "utf8");
-const specOf = (markdown) => parseMarkdownToOpenApi(markdown).openapi;
+// The bundled template, pre-parsed into OpenAPI by the PHP parser (tests/parser_test.php guards
+// this fixture against drift, and PHP tests validate fresh template edits against it).
+const templateSpec = JSON.parse(readFileSync(new URL("../../test-fixtures/API_README_TEMPLATE.openapi.json", import.meta.url), "utf8"));
 const endpointsOf = (spec) => [...operationsForSpec(spec).values()];
 
 test("detects the login endpoint, token path and header format from the README template", () => {
-  const spec = specOf(template);
-  const config = detectAuthConfig(spec, endpointsOf(spec));
+  const config = detectAuthConfig(templateSpec, endpointsOf(templateSpec));
   assert.equal(config.authRequired, true);
   assert.equal(config.loginMethod, "POST");
   assert.equal(config.loginPath, "/auth/login.php");
@@ -28,10 +27,13 @@ test("detects the login endpoint, token path and header format from the README t
   assert.equal(config.loginFields[1].placeholder, "");
 });
 
-test("an environment's login settings win over the detected endpoint", () => {
-  const spec = specOf(template.replace("**Auth.**", "Environments: QA=https://qa.example.com|login=/auth/login.php|token=data.access|method=POST\n\n**Auth.**"));
-  assert.equal(spec.servers[0].url, "https://qa.example.com");
-  const config = detectAuthConfig(spec, endpointsOf(spec), spec.servers[0]);
+test("a server's x-login-* settings win over the detected endpoint", () => {
+  const server = { url: "https://qa.example.com", "x-login-url": "/auth/login.php", "x-token-path": "data.access" };
+  const spec = {
+    ...structuredClone(templateSpec),
+    servers: [server],
+  };
+  const config = detectAuthConfig(spec, endpointsOf(spec), server);
   assert.equal(config.loginPath, "/auth/login.php");
   assert.equal(config.tokenPath, "data.access");
   assert.equal(config.loginFields.length, 2);

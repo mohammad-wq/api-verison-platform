@@ -27,6 +27,30 @@ final class Server
             $root . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'router.php',
         ];
 
+        // Probe the port before announcing anything. A TCP connect is the authoritative check:
+        // a bind probe alone can "succeed" on Windows even when another listener owns the port,
+        // and a blocked/excluded port fails at bind time inside the child server.
+        $peer = @fsockopen($host, $port, $errNo, $errStr, 0.5);
+        if (is_resource($peer)) {
+            fclose($peer);
+            // Windows can also "connect" to addresses inside an excluded port range and only
+            // deny the bind; re-checking the bind keeps the refusal message truthful.
+            $listener = @stream_socket_server("tcp://{$host}:{$port}", $errNo, $errStr);
+            if ($listener !== false) {
+                fclose($listener);
+                fwrite(STDERR, "Port {$port} is already in use on {$host}. Stop the other server or use a different port.\n");
+                return 1;
+            }
+            fwrite(STDERR, "Could not bind {$host}:{$port} — {$errStr} (port in use, or blocked/excluded on Windows?). Try a different port.\n");
+            return 1;
+        }
+        $probe = @stream_socket_server("tcp://{$host}:{$port}", $errNo, $errStr);
+        if ($probe === false) {
+            fwrite(STDERR, "Could not bind {$host}:{$port} — {$errStr} (port in use, or blocked/excluded on Windows?). Try a different port.\n");
+            return 1;
+        }
+        fclose($probe);
+
         $env = getenv();
         $env['AVP_SERVER_HOST'] = $host;
         // Lets the UI keep working while the Test APIs tab waits on a slow API. PHP does not support workers on Windows.
@@ -42,6 +66,8 @@ final class Server
             fwrite(STDERR, "Failed to start the PHP built-in server.\n");
             return 1;
         }
+
+        echo "API Version Platform running at http://{$host}:{$port}\n";
 
         return proc_close($process);
     }

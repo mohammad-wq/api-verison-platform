@@ -83,10 +83,28 @@ try {
         exit($status['state'] === 'modified' ? 2 : ($status['state'] === 'clean' || $status['state'] === 'uninitialized' ? 0 : 1));
     }
     if ($command === 'version' && ($positionals[1] ?? '') === 'create') {
-        $result = $service->create((string) ($positionals[2] ?? ''), (string) ($options['note'] ?? ''), isset($options['allow-unchanged']));
+        $label = (string) ($positionals[2] ?? '');
+        // Detect the duplicate before the INSERT so the CLI speaks the same message the API answers with.
+        if ($service->get($label) !== null) throw new RuntimeException("A version with label {$label} already exists.");
+        $result = $service->create($label, (string) ($options['note'] ?? ''), isset($options['allow-unchanged']));
         avpJson($result); exit(0);
     }
-    if ($command === 'version' && ($positionals[1] ?? '') === 'list') { avpJson($service->all()); exit(0); }
+    if ($command === 'version' && ($positionals[1] ?? '') === 'list') {
+        $versions = $service->all();
+        if (isset($options['json'])) { avpJson($versions); exit(0); }
+        $newest = $versions ? (int) $versions[0]['id'] : null;
+        foreach ($versions as $version) {
+            $warnings = $version['warnings'] ?? [];
+            fwrite(STDOUT, implode('  ', array_filter([
+                $version['label'] . ((int) $version['id'] === $newest ? ' (latest)' : ''),
+                is_array($warnings) && $warnings !== [] ? count($warnings) . ' parse warning' . (count($warnings) === 1 ? '' : 's') : null,
+                is_array($version['statistics'] ?? null) ? (($version['statistics']['endpoints'] ?? 0) . ' endpoints') : null,
+                $version['note'] !== null ? "note: {$version['note']}" : null,
+                $version['created_at'],
+            ])) . PHP_EOL);
+        }
+        exit(0);
+    }
     if ($command === 'version' && ($positionals[1] ?? '') === 'show') {
         $version = $service->get((string) ($positionals[2] ?? ''));
         if ($version === null) throw new RuntimeException('Version not found.');
@@ -102,10 +120,14 @@ try {
         $host = (string) ($options['host'] ?? $config['server']['host']);
         $port = (int) ($options['port'] ?? $config['server']['port']);
         if ($host !== '127.0.0.1' && $host !== 'localhost') fwrite(STDERR, "Warning: this unauthenticated tool should not be exposed to an untrusted network.\n");
-        fwrite(STDOUT, "API Version Platform running at http://{$host}:{$port}\n");
+        // The "running at" line is printed by Server::run(), after the server's port is reachable —
+        // a blocked port must not be announced as up.
         exit(Server::run($host, $port, $configFile));
     }
     fwrite(STDERR, "Unknown command.\n\n{$usage}"); exit(1);
 } catch (Throwable $e) {
+    if ($e instanceof \PDOException && $e->getCode() === '23000') {
+        $e = new RuntimeException('A version with this label already exists.');
+    }
     fwrite(STDERR, $e->getMessage() . PHP_EOL); exit(1);
 }

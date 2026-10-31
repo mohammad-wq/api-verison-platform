@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { prepareOpenApiImport, validateOpenApiDocument } from "./openapi_import.js";
-import { parseMarkdownToOpenApi } from "../parser/index.js";
 
 const validSpec = {
   openapi: "3.0.3",
@@ -15,55 +13,51 @@ const validSpec = {
   },
 };
 
-test("parses the README fixture and validates all detected operations", async () => {
-  const markdown = await readFile(new URL("../../test-fixtures/DUMMY_PROJECT_TEST_README.md", import.meta.url), "utf8");
-  const prepared = prepareOpenApiImport(markdown, { filename: "DUMMY_PROJECT_TEST_README.md" });
-  assert.equal(prepared.sourceType, "markdown");
-  assert.equal(prepared.statistics.endpoints, 14);
-  assert.equal(prepared.warnings.length, 0);
-  assert.deepEqual(validateOpenApiDocument(prepared.openapi), []);
-});
-
-test("accepts valid OpenAPI JSON while rejecting malformed and non-API input", () => {
-  const prepared = prepareOpenApiImport(JSON.stringify(validSpec), { filename: "api.json" });
+test("accepts valid OpenAPI JSON while rejecting malformed and non-API input", async () => {
+  const prepared = await prepareOpenApiImport(JSON.stringify(validSpec), { filename: "api.json" });
   assert.equal(prepared.sourceType, "json");
+  assert.deepEqual(prepared.warnings, []);
+  assert.equal(prepared.statistics, null);
   assert.deepEqual(validateOpenApiDocument(prepared.openapi), []);
-  assert.throws(() => prepareOpenApiImport('{"openapi":', { filename: "api.json" }), /Invalid JSON/);
-  assert.throws(() => prepareOpenApiImport("# Notes only\n\nNo endpoints here."), /at least one HTTP operation/);
+  await assert.rejects(() => prepareOpenApiImport('{"openapi":', { filename: "api.json" }), /Invalid JSON/);
+  await assert.rejects(() => prepareOpenApiImport(""), /empty/);
 });
 
-test("parses a plain Servers URL into the OpenAPI document", () => {
-  const { openapi } = parseMarkdownToOpenApi("# Ticket API\n\nServers: http://api.example.com/backend/\n");
-  assert.deepEqual(openapi.servers, [{ url: "http://api.example.com/backend" }]);
+test("markdown input goes through the injected server-side README parser", async () => {
+  const parserOpenapi = validSpec;
+  const warnings = [{ code: "W_NO_EXAMPLES", message: "No JSON examples found.", lines: [1, 1] }];
+  const statistics = { endpoints: 1, methods: { get: 1 }, tags: 1 };
+  const calls = [];
+  const prepared = await prepareOpenApiImport("# Some README", {
+    parseMarkdown: async (markdown) => {
+      calls.push(markdown);
+      return { openapi: parserOpenapi, warnings, statistics };
+    },
+  });
+  assert.equal(prepared.sourceType, "markdown");
+  assert.equal(prepared.openapi, parserOpenapi);
+  assert.deepEqual(prepared.warnings, warnings);
+  assert.deepEqual(prepared.statistics, statistics);
+  assert.deepEqual(calls, ["# Some README"]);
 });
 
-test("preserves a README's formatted server URL and request argument order", () => {
-  const markdown = `# Ticket API
+test("README Markdown needs the injected parseMarkdown callback", async () => {
+  await assert.rejects(() => prepareOpenApiImport("# Title\n\nNo endpoints."), /requires the platform server/);
+});
 
-Servers: \`http://api.example.com/backend/\`
-
-## Authentication — \`auth/\`
-
-### POST \`auth/login.php\`
-Auth: false
-No token required.
-
-Request:
-\`\`\`json
-{
-  "identifier": "10002315",
-  "password": "YourPassword@123"
-}
-\`\`\`
-`;
-  const { openapi } = parseMarkdownToOpenApi(markdown);
-  const login = openapi.paths["/auth/login.php"].post;
-  const request = login.requestBody.content["application/json"];
-
-  assert.deepEqual(openapi.servers, [{ url: "http://api.example.com/backend" }]);
-  assert.deepEqual(Object.keys(request.schema.properties), ["identifier", "password"]);
-  assert.deepEqual(Object.keys(request.example), ["identifier", "password"]);
-  assert.deepEqual(login.security, []);
+test("a failing README parser reports why the parse failed", async () => {
+  await assert.rejects(
+    () => prepareOpenApiImport("# Title", { parseMarkdown: async () => ({ openapi: { openapi: "3.0.3", info: { title: "t", version: "1" }, paths: {} } }) }),
+    /at least one HTTP operation/,
+  );
+  await assert.rejects(
+    () => prepareOpenApiImport("# Title", { parseMarkdown: async () => ({ warnings: [] }) }),
+    /did not return an OpenAPI document/,
+  );
+  await assert.rejects(
+    () => prepareOpenApiImport("# Title", { parseMarkdown: async () => Promise.reject(new Error("server exploded")) }),
+    /Could not parse README Markdown: server exploded/,
+  );
 });
 
 test("requires path parameters and responses before a spec can be saved", () => {
@@ -110,7 +104,8 @@ test("validates reusable parameters, responses, request bodies, schemas, and aut
   assert.deepEqual(validateOpenApiDocument(spec), []);
 });
 
-test("rejects mismatched Markdown and JSON file extensions", () => {
-  assert.throws(() => prepareOpenApiImport("# API", { filename: "api.json" }), /\.json extension/);
-  assert.throws(() => prepareOpenApiImport(JSON.stringify(validSpec), { filename: "api.md" }), /Markdown extension/);
+test("rejects mismatched Markdown and JSON file extensions", async () => {
+  await assert.rejects(() => prepareOpenApiImport("# API", { filename: "api.json" }), /\.json extension/);
+  await assert.rejects(() => prepareOpenApiImport(JSON.stringify(validSpec), { filename: "api.md" }), /Markdown extension/);
+  await assert.rejects(() => prepareOpenApiImport("gibberish", { filename: "api.txt" }), /\.json, \.md/);
 });

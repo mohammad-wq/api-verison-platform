@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { api } from "../../api.js";
 import { appPath } from "../../base.js";
 import { useAuth } from "../../auth.jsx";
@@ -118,15 +119,25 @@ export default function MembersTab({ project, can, reloadProject }) {
     if (updated) refresh();
   };
 
+  // Member removal is confirmed with the app's confirm bar, not window.confirm.
+  const [confirming, setConfirming] = useState(null);
+
   const remove = async (member) => {
     const self = member.userId === user.id;
     if ((!can("OWNER") && !self) || member.userId === project.ownerId) return;
-    if (!window.confirm(self ? "Leave this project?" : `Remove ${member.user.email} from this project?`)) return;
+    setConfirming(member);
+  };
+
+  const removeConfirmed = async () => {
+    const member = confirming;
+    if (!member) return;
+    const self = member.userId === user.id;
     const ok = await change.run(async () => {
       await api.removeMember(project.id, member.userId);
       return true;
     });
     if (ok) {
+      setConfirming(null);
       if (self) window.location.assign(appPath("/"));
       else refresh();
     }
@@ -150,6 +161,20 @@ export default function MembersTab({ project, can, reloadProject }) {
           </div>
         </div>
         <ErrorBanner error={change.error} onDismiss={() => change.setError(null)} />
+        {confirming && (
+          <div className="confirm-bar" role="alertdialog" aria-label={confirming.userId === user.id ? "Confirm leaving the project" : "Confirm collaborator removal"}>
+            <Icon name="alert" />
+            <span className="grow">
+              <strong>{confirming.userId === user.id ? "Leave this project?" : `Remove ${confirming.user.email} from this project?`}</strong> Access is taken away immediately. This cannot be undone.
+            </span>
+            <button className="btn btn-danger-solid" onClick={removeConfirmed} disabled={change.busy}>
+              {change.busy ? "Removing…" : confirming.userId === user.id ? "Yes, leave" : "Yes, remove"}
+            </button>
+            <button className="btn" onClick={() => setConfirming(null)}>
+              Cancel
+            </button>
+          </div>
+        )}
         {members.loading && !members.data && <SkeletonList rows={3} height={52} label="Loading collaborators" />}
         <ErrorBanner error={members.error} />
         <ul className="people-list">

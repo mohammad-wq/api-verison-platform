@@ -94,9 +94,14 @@ function compareResponses(oldOp, newOp) {
 }
 
 function compareDocs(oldOp, newOp) {
+  // The whole endpoint was added or removed: its fields do not "change", they only exist on one
+  // side. Consumers use the removed/added flags as badges instead of "changed", and identical
+  // old/new values are never paired up.
+  const removed = Boolean(oldOp && !newOp);
+  const added = Boolean(!oldOp && newOp);
   const text = (label, before, after) => {
     const rows = diffLines(textLines(before), textLines(after));
-    return { label, rows, counts: summarizeRows(rows), changed: (before ?? "") !== (after ?? "") };
+    return { label, rows, counts: summarizeRows(rows), oldText: before ?? "", newText: after ?? "", changed: (before ?? "") !== (after ?? "") };
   };
   const list = (label, before = [], after = []) => ({
     label,
@@ -110,8 +115,18 @@ function compareDocs(oldOp, newOp) {
     list("Permissions", oldOp?.permissions, newOp?.permissions),
     list("Tags", oldOp?.tags, newOp?.tags),
   ];
-  const authChanged = Boolean(oldOp && newOp) && oldOp.requiresAuth !== newOp.requiresAuth;
-  return { items, auth: { old: oldOp?.requiresAuth ?? null, new: newOp?.requiresAuth ?? null, changed: authChanged }, changed: authChanged || items.some((i) => i.changed) };
+  const authChanged = removed || added ? false : Boolean(oldOp && newOp) && oldOp.requiresAuth !== newOp.requiresAuth;
+  return {
+    items,
+    removed,
+    added,
+    auth: { old: oldOp?.requiresAuth ?? null, new: newOp?.requiresAuth ?? null, changed: authChanged },
+    changed:
+      authChanged ||
+      (removed || added
+        ? items.some((item) => (item.rows ? item.rows.some((row) => row.type !== "same") : (item.old ?? item.new ?? []).length > 0))
+        : items.some((i) => i.changed)),
+  };
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -244,7 +259,9 @@ function changeList(body, parameters, responses, docs) {
   }
 
   for (const item of docs.items.filter((i) => i.changed)) {
-    if (item.rows) list.push({ kind: "changed", area: item.label, text: "wording changed" });
+    if (docs.removed) list.push({ kind: "removed", area: item.label, text: (item.oldText ?? (item.old ?? []).join(", ")) || "" });
+    else if (docs.added) list.push({ kind: "added", area: item.label, text: (item.newText ?? (item.new ?? []).join(", ")) || "" });
+    else if (item.rows) list.push({ kind: "changed", area: item.label, text: "wording changed" });
     else list.push({ kind: "changed", area: item.label, from: item.old.join(", ") || "none", to: item.new.join(", ") || "none" });
   }
   return list;

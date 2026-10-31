@@ -47,8 +47,11 @@ function ProjectHistory({ project }) {
   }, [all, text, method, statusClass, userId, fromTime, toTime]);
   const filtering = Boolean(text.trim() || method || statusClass || userId || fromTime || toTime);
 
+  // Clearing is confirmed with the app's confirm bar, not window.confirm: it cannot silently
+  // block automation and the rest of the UI stays consistent.
+  const [confirmClear, setConfirmClear] = useState(false);
+
   const clear = async () => {
-    if (!window.confirm(`Delete your ${mine} saved request${mine === 1 ? "" : "s"} for "${project.name}"? Other members' requests are not affected. This cannot be undone.`)) return;
     const done = await run(async () => {
       await api.clearRequestHistory(project.id);
       return true;
@@ -78,11 +81,25 @@ function ProjectHistory({ project }) {
           </p>
         </div>
         <div className="row wrap">
-          <button className="btn btn-small" onClick={clear} disabled={busy || mine === 0} title="Deletes only your own saved requests">
-            <Icon name="trash" /> {busy ? "Clearing…" : "Clear my history"}
+          <button className="btn btn-small" onClick={() => setConfirmClear(true)} disabled={mine === 0} title="Deletes only your own saved requests">
+            <Icon name="trash" /> Clear my history
           </button>
         </div>
       </div>
+      {confirmClear && (
+        <div className="confirm-bar" role="alertdialog" aria-label="Confirm clearing your request history">
+          <Icon name="alert" />
+          <span className="grow">
+            <strong>Delete your {mine} saved request{mine === 1 ? "" : "s"} for “{project.name}”?</strong> Other members' requests are not affected. This cannot be undone.
+          </span>
+          <button className="btn btn-danger-solid" onClick={clear} disabled={busy}>
+            {busy ? "Deleting…" : "Yes, delete"}
+          </button>
+          <button className="btn" onClick={() => setConfirmClear(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
       {(all.length > 0 || fromTime || toTime) && (
         <div className="filter-bar">

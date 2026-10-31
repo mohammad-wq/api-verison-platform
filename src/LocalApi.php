@@ -18,6 +18,8 @@ final class LocalApi
     public const PROJECT_ID = 1;
     private const USER = ['id' => 1, 'name' => 'Local user', 'email' => 'local', 'role' => 'admin', 'status' => 'active'];
     private const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+    /** Same limit as the UI's import check, so no README is parsed that the UI would refuse anyway. */
+    private const MAX_PARSE_BYTES = 5 * 1024 * 1024;
 
     private PDO $pdo;
 
@@ -32,6 +34,7 @@ final class LocalApi
         $routes = [
             'GET /local/status' => fn () => ['mode' => 'local', 'projectId' => self::PROJECT_ID],
             'GET /local/readme' => fn () => $this->readmeStatus(),
+            'POST /local/readme/parse' => fn () => $this->parseReadme(),
             'POST /local/readme/save' => fn () => $this->saveReadme(),
             'GET /auth/fetch/getProfile.php' => fn () => self::USER,
             'GET /projects/fetch/getProjects.php' => fn () => [$this->project()],
@@ -101,6 +104,25 @@ final class LocalApi
             'nextVersionNumber' => $this->versions->nextLabel(),
             'summary' => $changed ? $this->versions->workingCopySummary() : null,
         ];
+    }
+
+    /**
+     * Parses client-supplied Markdown with the same PHP parser the CLI uses. The UI asks for this
+     * before saving a README version, so a version created in the browser stores exactly the
+     * OpenAPI a `avp version create` of the same README would — same statistics, same content hash.
+     *
+     * @return array{openapi: array, warnings: list<array<string, mixed>>, statistics: array<string, mixed>}
+     */
+    private function parseReadme(): array
+    {
+        $markdown = (string) ($this->input()['markdown'] ?? '');
+        if (trim($markdown) === '') {
+            throw new \InvalidArgumentException('markdown is required');
+        }
+        if (strlen($markdown) > self::MAX_PARSE_BYTES) {
+            throw new \InvalidArgumentException('README Markdown is too large (5 MB maximum).');
+        }
+        return \MarkdownOpenApiParser::parse($markdown);
     }
 
     /** Saves the working README as a version. The client sends the label it showed; otherwise the next one is suggested. */
